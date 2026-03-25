@@ -70,6 +70,23 @@ git-smart pull
 git-smart status
 ```
 
+## Dependencies
+
+Required:
+
+- `git`
+- `ssh`
+
+Optional:
+
+- `gh` for GitHub repo creation during `git-smart init`
+- `pbcopy` on macOS for clipboard support during `git-smart setup`
+- `open` on macOS for `git-smart open`
+- `xdg-open` on Linux for `git-smart open`
+- `wl-copy` or `xclip` on Linux for clipboard support during `git-smart setup`
+
+`install.sh` checks these and prints warnings or install hints where appropriate.
+
 ## Config file
 
 `git-smart` uses:
