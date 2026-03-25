@@ -1207,7 +1207,6 @@ run_push() {
   resolve_repo_context
   rewrite_remote_if_needed
   show_repo_context
-  apply_xcode_hygiene
 
   info "Git status:"
   git status -sb
