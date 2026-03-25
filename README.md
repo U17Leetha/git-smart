@@ -26,6 +26,19 @@ git-smart switch --profile work
 git-smart doctor
 ```
 
+## Install
+
+```bash
+./install.sh
+```
+
+Optional:
+
+```bash
+./install.sh --dry-run
+./install.sh --prefix "$HOME/.local/bin"
+```
+
 ## First-run flow
 
 ```bash
@@ -85,3 +98,4 @@ GITHUB_WORK_DEFAULT_OWNER="Strong-Crypto-Innovations"
 
 - `git-smart`: main CLI
 - `git-smart-push`: compatibility wrapper for `git-smart push`
+- `install.sh`: installer for `/usr/local/bin` or another prefix
