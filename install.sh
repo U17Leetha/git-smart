@@ -25,6 +25,11 @@ warn() {
   printf '[!] %s\n' "$1" >&2
 }
 
+die() {
+  printf '[!] %s\n' "$1" >&2
+  exit 1
+}
+
 hint_for_required() {
   local cmd="$1"
 
@@ -147,6 +152,20 @@ install_file() {
   fi
 }
 
+ensure_prefix_writable() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    return 0
+  fi
+
+  mkdir -p "$PREFIX" 2>/dev/null || true
+
+  if [[ -w "$PREFIX" ]]; then
+    return 0
+  fi
+
+  die "Install prefix '$PREFIX' is not writable. Re-run with sudo or use --prefix \"$HOME/.local/bin\"."
+}
+
 main() {
   parse_args "$@"
 
@@ -160,6 +179,7 @@ main() {
   }
 
   check_dependencies
+  ensure_prefix_writable
   log "Installing into $PREFIX"
 
   if [[ "$DRY_RUN" -eq 0 ]]; then
