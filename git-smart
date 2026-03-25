@@ -1,0 +1,1430 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROGRAM_NAME="git-smart"
+CONFIG_FILE="${HOME}/.config/git-smart.conf"
+SSH_CONFIG_FILE="${HOME}/.ssh/config"
+
+DEFAULT_PERSONAL_HOST="github-personal"
+DEFAULT_WORK_HOST="github-work"
+DEFAULT_GITHUB_HOST="github.com"
+DEFAULT_PERSONAL_DIR="${HOME}/Development/Personal"
+DEFAULT_WORK_DIR="${HOME}/Development/Work"
+
+COMMAND=""
+PROFILE="auto"
+REMOTE="origin"
+DRY_RUN=0
+SET_UPSTREAM=0
+PUSH_ONLY=0
+COMMIT_MESSAGE=""
+INIT_NAME=""
+INIT_OWNER=""
+CLONE_SPEC=""
+CLONE_DEST=""
+VISIBILITY="private"
+FORCE_CONTEXT_WRITE=0
+
+REPO_ROOT=""
+BRANCH=""
+REMOTE_URL=""
+REMOTE_OWNER=""
+REMOTE_REPO=""
+REMOTE_HOST=""
+TARGET_PROFILE=""
+TARGET_HOST=""
+TARGET_OWNER=""
+PROFILE_SOURCE=""
+
+die() {
+  printf '[!] %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '[*] %s\n' "$*"
+}
+
+warn() {
+  printf '[!] %s\n' "$*" >&2
+}
+
+prompt() {
+  local prompt_text="$1"
+  local default_value="${2-}"
+  local input=""
+
+  if [[ -n "$default_value" ]]; then
+    read -r -p "$prompt_text [$default_value]: " input
+    printf '%s\n' "${input:-$default_value}"
+  else
+    read -r -p "$prompt_text: " input
+    printf '%s\n' "$input"
+  fi
+}
+
+prompt_yes_no() {
+  local prompt_text="$1"
+  local default_answer="${2:-y}"
+  local input=""
+
+  while true; do
+    if [[ "$default_answer" == "y" ]]; then
+      read -r -p "$prompt_text [Y/n]: " input
+      input="${input:-y}"
+    else
+      read -r -p "$prompt_text [y/N]: " input
+      input="${input:-n}"
+    fi
+
+    case "${input,,}" in
+      y|yes) return 0 ;;
+      n|no) return 1 ;;
+    esac
+  done
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  git-smart <command> [options]
+
+Commands:
+  setup     Interactive first-run setup for personal/work GitHub profiles
+  init      Create a new repo in the correct personal/work directory
+  clone     Clone a repo into the correct personal/work directory
+  push      Commit and push using the repo's saved context
+  pull      Pull using the repo's saved context
+  status    Show repo status plus git-smart context
+  where     Print the repo's resolved git-smart context
+  open      Open the repo's GitHub page
+  switch    Rebind the current repo to personal or work
+  doctor    Diagnose config, SSH aliases, and current repo context
+  help      Show help
+
+Examples:
+  git-smart setup
+  git-smart init
+  git-smart clone Strong-Crypto-Innovations/sc-hub
+  git-smart push
+  git-smart pull
+  git-smart where
+EOF
+}
+
+usage_setup() {
+  cat <<'EOF'
+Usage: git-smart setup
+
+Interactive onboarding for:
+  - personal/work GitHub owners
+  - base directories
+  - SSH host aliases
+  - optional SSH config stanzas
+  - generating missing personal/work SSH keys
+EOF
+}
+
+usage_init() {
+  cat <<'EOF'
+Usage: git-smart init [options] <repo-name>
+
+Options:
+  --profile personal|work
+  --owner OWNER
+  --public
+  --private
+  --dry-run
+
+If --profile is omitted, git-smart will ask interactively.
+EOF
+}
+
+usage_clone() {
+  cat <<'EOF'
+Usage: git-smart clone [options] <owner/repo> [destination]
+
+Options:
+  --profile personal|work|auto
+  --dry-run
+
+If --profile is omitted, git-smart will infer from owner or ask interactively.
+EOF
+}
+
+usage_push() {
+  cat <<'EOF'
+Usage: git-smart push [options] [commit message]
+
+Options:
+  --profile personal|work|auto
+  --remote NAME
+  --push-only
+  --set-upstream
+  --dry-run
+
+Normally you should not need --profile after the repo has been initialized or cloned with git-smart.
+EOF
+}
+
+usage_pull() {
+  cat <<'EOF'
+Usage: git-smart pull [options]
+
+Options:
+  --profile personal|work|auto
+  --remote NAME
+  --dry-run
+EOF
+}
+
+usage_status() {
+  cat <<'EOF'
+Usage: git-smart status [options]
+
+Options:
+  --profile personal|work|auto
+  --remote NAME
+EOF
+}
+
+usage_where() {
+  cat <<'EOF'
+Usage: git-smart where [options]
+
+Options:
+  --profile personal|work|auto
+  --remote NAME
+EOF
+}
+
+usage_open() {
+  cat <<'EOF'
+Usage: git-smart open [options]
+
+Options:
+  --remote NAME
+EOF
+}
+
+usage_switch() {
+  cat <<'EOF'
+Usage: git-smart switch [options]
+
+Options:
+  --profile personal|work
+  --owner OWNER
+  --remote NAME
+  --dry-run
+EOF
+}
+
+usage_doctor() {
+  cat <<'EOF'
+Usage: git-smart doctor [options]
+
+Options:
+  --profile personal|work|auto
+  --remote NAME
+EOF
+}
+
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+  fi
+
+  GITHUB_PERSONAL_HOST="${GITHUB_PERSONAL_HOST:-$DEFAULT_PERSONAL_HOST}"
+  GITHUB_WORK_HOST="${GITHUB_WORK_HOST:-$DEFAULT_WORK_HOST}"
+  GITHUB_DEFAULT_HOST="${GITHUB_DEFAULT_HOST:-$DEFAULT_GITHUB_HOST}"
+  GIT_SMART_PERSONAL_DIR="${GIT_SMART_PERSONAL_DIR:-$DEFAULT_PERSONAL_DIR}"
+  GIT_SMART_WORK_DIR="${GIT_SMART_WORK_DIR:-$DEFAULT_WORK_DIR}"
+
+  if ! declare -p GITHUB_PERSONAL_OWNERS >/dev/null 2>&1; then
+    GITHUB_PERSONAL_OWNERS=()
+  fi
+
+  if ! declare -p GITHUB_WORK_OWNERS >/dev/null 2>&1; then
+    GITHUB_WORK_OWNERS=()
+  fi
+
+  GITHUB_PERSONAL_DEFAULT_OWNER="${GITHUB_PERSONAL_DEFAULT_OWNER:-${GITHUB_PERSONAL_OWNERS[0]:-}}"
+  GITHUB_WORK_DEFAULT_OWNER="${GITHUB_WORK_DEFAULT_OWNER:-${GITHUB_WORK_OWNERS[0]:-}}"
+}
+
+save_config() {
+  local personal_owner work_owner
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+
+  personal_owner="${GITHUB_PERSONAL_DEFAULT_OWNER:-}"
+  work_owner="${GITHUB_WORK_DEFAULT_OWNER:-}"
+
+  cat > "$CONFIG_FILE" <<EOF
+GIT_SMART_PERSONAL_DIR="$GIT_SMART_PERSONAL_DIR"
+GIT_SMART_WORK_DIR="$GIT_SMART_WORK_DIR"
+
+GITHUB_PERSONAL_HOST="$GITHUB_PERSONAL_HOST"
+GITHUB_WORK_HOST="$GITHUB_WORK_HOST"
+
+GITHUB_PERSONAL_OWNERS=(${GITHUB_PERSONAL_OWNERS[*]})
+GITHUB_WORK_OWNERS=(${GITHUB_WORK_OWNERS[*]})
+
+GITHUB_PERSONAL_DEFAULT_OWNER="$personal_owner"
+GITHUB_WORK_DEFAULT_OWNER="$work_owner"
+EOF
+}
+
+parse_global_args() {
+  [[ $# -gt 0 ]] || {
+    usage
+    exit 0
+  }
+
+  case "$1" in
+    help|-h|--help)
+      usage
+      exit 0
+      ;;
+    setup|init|clone|push|pull|status|where|open|switch|doctor)
+      COMMAND="$1"
+      shift
+      ;;
+    *)
+      die "Unknown command: $1"
+      ;;
+  esac
+
+  parse_command_args "$COMMAND" "$@"
+}
+
+parse_common_option() {
+  PARSE_CONSUMED=0
+
+  case "$1" in
+    --profile)
+      [[ $# -ge 2 ]] || die "--profile requires a value"
+      PROFILE="$2"
+      PARSE_CONSUMED=2
+      return 0
+      ;;
+    --remote)
+      [[ $# -ge 2 ]] || die "--remote requires a value"
+      REMOTE="$2"
+      PARSE_CONSUMED=2
+      return 0
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      PARSE_CONSUMED=1
+      return 0
+      ;;
+    -h|--help)
+      case "$COMMAND" in
+        setup) usage_setup ;;
+        init) usage_init ;;
+        clone) usage_clone ;;
+        push) usage_push ;;
+        pull) usage_pull ;;
+        status) usage_status ;;
+        where) usage_where ;;
+        open) usage_open ;;
+        switch) usage_switch ;;
+        doctor) usage_doctor ;;
+      esac
+      exit 0
+      ;;
+  esac
+
+  return 1
+}
+
+parse_command_args() {
+  local command="$1"
+  shift
+
+  while [[ $# -gt 0 ]]; do
+    if parse_common_option "$@"; then
+      shift "$PARSE_CONSUMED"
+      continue
+    fi
+
+    case "$command" in
+      setup)
+        die "setup does not accept additional options"
+        ;;
+      init)
+        case "$1" in
+          --owner)
+            [[ $# -ge 2 ]] || die "--owner requires a value"
+            INIT_OWNER="$2"
+            shift
+            ;;
+          --public)
+            VISIBILITY="public"
+            ;;
+          --private)
+            VISIBILITY="private"
+            ;;
+          *)
+            break
+            ;;
+        esac
+        ;;
+      clone)
+        case "$1" in
+          *)
+            break
+            ;;
+        esac
+        ;;
+      push)
+        case "$1" in
+          --push-only)
+            PUSH_ONLY=1
+            ;;
+          --set-upstream)
+            SET_UPSTREAM=1
+            ;;
+          *)
+            break
+            ;;
+        esac
+        ;;
+      switch)
+        case "$1" in
+          --owner)
+            [[ $# -ge 2 ]] || die "--owner requires a value"
+            INIT_OWNER="$2"
+            shift
+            ;;
+          *)
+            break
+            ;;
+        esac
+        ;;
+      pull|status|where|open|doctor)
+        break
+        ;;
+    esac
+
+    shift
+  done
+
+  case "$command" in
+    push)
+      if [[ $# -gt 0 ]]; then
+        COMMIT_MESSAGE="$*"
+      fi
+      ;;
+    init)
+      if [[ $# -gt 1 ]]; then
+        die "init requires only one repo name"
+      fi
+      INIT_NAME="${1:-}"
+      ;;
+    clone)
+      [[ $# -ge 1 && $# -le 2 ]] || die "clone requires <owner/repo> and optional [destination]"
+      CLONE_SPEC="$1"
+      CLONE_DEST="${2:-}"
+      ;;
+    switch)
+      :
+      ;;
+  esac
+
+  case "$PROFILE" in
+    auto|personal|work) ;;
+    *)
+      die "--profile must be one of: auto, personal, work"
+      ;;
+  esac
+}
+
+owner_in_list() {
+  local owner="$1"
+  shift || true
+  local candidate
+
+  for candidate in "$@"; do
+    [[ "$candidate" == "$owner" ]] && return 0
+  done
+
+  return 1
+}
+
+profile_base_dir() {
+  case "$1" in
+    personal) printf '%s\n' "$GIT_SMART_PERSONAL_DIR" ;;
+    work) printf '%s\n' "$GIT_SMART_WORK_DIR" ;;
+    *) die "Cannot resolve base directory for profile '$1'" ;;
+  esac
+}
+
+profile_default_owner() {
+  case "$1" in
+    personal) printf '%s\n' "$GITHUB_PERSONAL_DEFAULT_OWNER" ;;
+    work) printf '%s\n' "$GITHUB_WORK_DEFAULT_OWNER" ;;
+    *) printf '\n' ;;
+  esac
+}
+
+profile_host() {
+  case "$1" in
+    personal) printf '%s\n' "$GITHUB_PERSONAL_HOST" ;;
+    work) printf '%s\n' "$GITHUB_WORK_HOST" ;;
+    *) printf '%s\n' "$GITHUB_DEFAULT_HOST" ;;
+  esac
+}
+
+ensure_repo() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not inside a git repository."
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  cd "$REPO_ROOT"
+}
+
+repo_get() {
+  git config --local --get "$1" 2>/dev/null || true
+}
+
+repo_set() {
+  local key="$1"
+  local value="$2"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    git config --local "$key" "$value"
+  fi
+}
+
+write_repo_context() {
+  local profile="$1"
+  local owner="$2"
+  local host="$3"
+
+  repo_set git-smart.profile "$profile"
+  repo_set git-smart.owner "$owner"
+  repo_set git-smart.sshHost "$host"
+}
+
+parse_github_url() {
+  local url="$1"
+  local repo_path=""
+
+  PARSED_HOST=""
+  PARSED_OWNER=""
+  PARSED_REPO=""
+
+  if [[ "$url" =~ ^git@([^:]+):([^/]+)/([^/]+)$ ]]; then
+    PARSED_HOST="${BASH_REMATCH[1]}"
+    PARSED_OWNER="${BASH_REMATCH[2]}"
+    repo_path="${BASH_REMATCH[3]}"
+    PARSED_REPO="${repo_path%.git}"
+    return 0
+  fi
+
+  if [[ "$url" =~ ^ssh://git@([^/]+)/([^/]+)/([^/]+)$ ]]; then
+    PARSED_HOST="${BASH_REMATCH[1]}"
+    PARSED_OWNER="${BASH_REMATCH[2]}"
+    repo_path="${BASH_REMATCH[3]}"
+    PARSED_REPO="${repo_path%.git}"
+    return 0
+  fi
+
+  if [[ "$url" =~ ^https://github\.com/([^/]+)/([^/]+)$ ]]; then
+    PARSED_HOST="github.com"
+    PARSED_OWNER="${BASH_REMATCH[1]}"
+    repo_path="${BASH_REMATCH[2]}"
+    PARSED_REPO="${repo_path%.git}"
+    return 0
+  fi
+
+  return 1
+}
+
+detect_profile_from_owner() {
+  local owner="$1"
+
+  if owner_in_list "$owner" "${GITHUB_PERSONAL_OWNERS[@]}"; then
+    printf 'personal\n'
+    return 0
+  fi
+
+  if owner_in_list "$owner" "${GITHUB_WORK_OWNERS[@]}"; then
+    printf 'work\n'
+    return 0
+  fi
+
+  printf 'auto\n'
+}
+
+detect_profile_from_path() {
+  local root="$1"
+
+  case "$root" in
+    "$GIT_SMART_PERSONAL_DIR"/*|"$GIT_SMART_PERSONAL_DIR")
+      printf 'personal\n'
+      ;;
+    "$GIT_SMART_WORK_DIR"/*|"$GIT_SMART_WORK_DIR")
+      printf 'work\n'
+      ;;
+    *)
+      printf 'auto\n'
+      ;;
+  esac
+}
+
+build_remote_url() {
+  local owner="$1"
+  local repo="$2"
+  local profile="$3"
+
+  printf 'git@%s:%s/%s.git\n' "$(profile_host "$profile")" "$owner" "$repo"
+}
+
+identity_for_host() {
+  local host="$1"
+  local identity_file=""
+
+  if command -v ssh >/dev/null 2>&1; then
+    identity_file="$(ssh -G "$host" 2>/dev/null | awk '$1 == "identityfile" { print $2; exit }')"
+  fi
+
+  printf '%s\n' "$identity_file"
+}
+
+open_url() {
+  local url="$1"
+
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+    return 0
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_profile_interactively() {
+  local answer=""
+
+  while true; do
+    read -r -p "Use personal or work profile? [personal/work]: " answer
+    case "${answer,,}" in
+      personal|p)
+        printf 'personal\n'
+        return
+        ;;
+      work|w)
+        printf 'work\n'
+        return
+        ;;
+    esac
+  done
+}
+
+load_remote_state() {
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  [[ "$BRANCH" != "HEAD" ]] || die "Detached HEAD is not supported."
+
+  git remote get-url "$REMOTE" >/dev/null 2>&1 || die "Remote '$REMOTE' not found."
+  REMOTE_URL="$(git remote get-url "$REMOTE")"
+
+  REMOTE_OWNER=""
+  REMOTE_REPO=""
+  REMOTE_HOST=""
+  if parse_github_url "$REMOTE_URL"; then
+    REMOTE_OWNER="$PARSED_OWNER"
+    REMOTE_REPO="$PARSED_REPO"
+    REMOTE_HOST="$PARSED_HOST"
+  fi
+}
+
+resolve_repo_context() {
+  local repo_profile repo_owner repo_host
+
+  repo_profile="$(repo_get git-smart.profile)"
+  repo_owner="$(repo_get git-smart.owner)"
+  repo_host="$(repo_get git-smart.sshHost)"
+
+  TARGET_PROFILE="$PROFILE"
+  PROFILE_SOURCE="explicit"
+  TARGET_OWNER="$repo_owner"
+  TARGET_HOST="$repo_host"
+
+  if [[ "$TARGET_PROFILE" == "auto" && -n "$repo_profile" ]]; then
+    TARGET_PROFILE="$repo_profile"
+    PROFILE_SOURCE="repo-config"
+  fi
+
+  if [[ -z "$TARGET_OWNER" && -n "$REMOTE_OWNER" ]]; then
+    TARGET_OWNER="$REMOTE_OWNER"
+  fi
+
+  if [[ "$TARGET_PROFILE" == "auto" && -n "$REMOTE_OWNER" ]]; then
+    TARGET_PROFILE="$(detect_profile_from_owner "$REMOTE_OWNER")"
+    if [[ "$TARGET_PROFILE" != "auto" ]]; then
+      PROFILE_SOURCE="owner-map"
+    fi
+  fi
+
+  if [[ "$TARGET_PROFILE" == "auto" ]]; then
+    TARGET_PROFILE="$(detect_profile_from_path "$REPO_ROOT")"
+    if [[ "$TARGET_PROFILE" != "auto" ]]; then
+      PROFILE_SOURCE="path"
+    fi
+  fi
+
+  if [[ "$TARGET_PROFILE" == "auto" && -n "$repo_host" ]]; then
+    if [[ "$repo_host" == "$GITHUB_PERSONAL_HOST" ]]; then
+      TARGET_PROFILE="personal"
+      PROFILE_SOURCE="repo-config"
+    elif [[ "$repo_host" == "$GITHUB_WORK_HOST" ]]; then
+      TARGET_PROFILE="work"
+      PROFILE_SOURCE="repo-config"
+    fi
+  fi
+
+  if [[ "$TARGET_PROFILE" == "auto" && -n "$REMOTE_HOST" ]]; then
+    if [[ "$REMOTE_HOST" == "$GITHUB_PERSONAL_HOST" ]]; then
+      TARGET_PROFILE="personal"
+      PROFILE_SOURCE="remote-host"
+    elif [[ "$REMOTE_HOST" == "$GITHUB_WORK_HOST" ]]; then
+      TARGET_PROFILE="work"
+      PROFILE_SOURCE="remote-host"
+    fi
+  fi
+
+  if [[ "$TARGET_PROFILE" == "auto" ]]; then
+    die "Could not resolve repo profile. Run 'git-smart doctor' or set the repo up with 'git-smart init/clone'."
+  fi
+
+  if [[ -z "$TARGET_OWNER" ]]; then
+    TARGET_OWNER="$(profile_default_owner "$TARGET_PROFILE")"
+  fi
+  if [[ -z "$TARGET_OWNER" && -n "$REMOTE_OWNER" ]]; then
+    TARGET_OWNER="$REMOTE_OWNER"
+  fi
+
+  TARGET_HOST="$(profile_host "$TARGET_PROFILE")"
+
+  if [[ -n "$TARGET_OWNER" && ("$FORCE_CONTEXT_WRITE" -eq 1 || -z "$repo_profile" || -z "$repo_owner" || -z "$repo_host") ]]; then
+    write_repo_context "$TARGET_PROFILE" "$TARGET_OWNER" "$TARGET_HOST"
+  fi
+}
+
+rewrite_remote_if_needed() {
+  local new_url
+
+  if [[ -z "$TARGET_OWNER" || -z "$REMOTE_REPO" ]]; then
+    return
+  fi
+
+  new_url="$(build_remote_url "$TARGET_OWNER" "$REMOTE_REPO" "$TARGET_PROFILE")"
+  if [[ "$REMOTE_URL" == "$new_url" ]]; then
+    return
+  fi
+
+  info "Updating $REMOTE remote to use profile '$TARGET_PROFILE'"
+  info "Old remote: $REMOTE_URL"
+  info "New remote: $new_url"
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    git remote set-url "$REMOTE" "$new_url"
+    REMOTE_URL="$new_url"
+  fi
+}
+
+apply_xcode_hygiene() {
+  local gitignore_marker tracked_xcuserdata tracked_xcuserstate
+  local gitignore_path="$REPO_ROOT/.gitignore"
+
+  gitignore_marker="# --- Xcode user data (added by git-smart) ---"
+
+  if [[ -f "$gitignore_path" ]]; then
+    if ! grep -qF "$gitignore_marker" "$gitignore_path"; then
+      info "Adding Xcode hygiene rules to .gitignore"
+      if [[ "$DRY_RUN" -eq 0 ]]; then
+        cat >> "$gitignore_path" <<'EOF'
+
+# --- Xcode user data (added by git-smart) ---
+xcuserdata/
+**/xcuserdata/
+*.xcuserstate
+DerivedData/
+EOF
+        git add .gitignore || true
+      fi
+    fi
+  else
+    info "Creating .gitignore with Xcode hygiene rules"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      cat > "$gitignore_path" <<'EOF'
+# --- Xcode user data (added by git-smart) ---
+xcuserdata/
+**/xcuserdata/
+*.xcuserstate
+DerivedData/
+EOF
+      git add .gitignore || true
+    fi
+  fi
+
+  tracked_xcuserdata="$(git ls-files -z | tr '\0' '\n' | grep -E '(^|/)xcuserdata/' || true)"
+  if [[ -n "$tracked_xcuserdata" ]]; then
+    warn "Removing tracked xcuserdata paths from the index"
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if [[ "$DRY_RUN" -eq 0 ]]; then
+        git rm -r --cached -- "$path"
+      fi
+    done <<< "$tracked_xcuserdata"
+  fi
+
+  tracked_xcuserstate="$(git ls-files -z | tr '\0' '\n' | grep -E '\.xcuserstate$' || true)"
+  if [[ -n "$tracked_xcuserstate" ]]; then
+    warn "Removing tracked *.xcuserstate files from the index"
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if [[ "$DRY_RUN" -eq 0 ]]; then
+        git rm --cached -- "$path"
+      fi
+    done <<< "$tracked_xcuserstate"
+  fi
+}
+
+append_ssh_host_if_missing() {
+  local host_alias="$1"
+  local key_path="$2"
+
+  mkdir -p "$(dirname "$SSH_CONFIG_FILE")"
+  touch "$SSH_CONFIG_FILE"
+
+  if grep -Eq "^Host[[:space:]]+${host_alias}$" "$SSH_CONFIG_FILE"; then
+    info "SSH host '$host_alias' already exists in $SSH_CONFIG_FILE"
+    return
+  fi
+
+  cat >> "$SSH_CONFIG_FILE" <<EOF
+
+Host $host_alias
+  HostName github.com
+  User git
+  IdentityFile $key_path
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentitiesOnly yes
+EOF
+}
+
+current_identity_for_host_config() {
+  local host_alias="$1"
+  local line
+
+  if [[ ! -f "$SSH_CONFIG_FILE" ]]; then
+    return 0
+  fi
+
+  line="$(awk -v host="$host_alias" '
+    $1 == "Host" && $2 == host { in_block=1; next }
+    $1 == "Host" && in_block { exit }
+    in_block && $1 == "IdentityFile" { print $2; exit }
+  ' "$SSH_CONFIG_FILE")"
+
+  printf '%s\n' "$line"
+}
+
+update_ssh_host_identity() {
+  local host_alias="$1"
+  local key_path="$2"
+  local tmp_file
+
+  tmp_file="$(mktemp)"
+
+  awk -v host="$host_alias" -v key="$key_path" '
+    function flush_block() {
+      if (!in_block) {
+        return
+      }
+
+      if (!replaced) {
+        if (last_line_empty == 0) {
+          print "  IdentityFile " key
+        } else {
+          print "  IdentityFile " key
+        }
+      }
+
+      in_block = 0
+      replaced = 0
+      last_line_empty = 0
+    }
+
+    $1 == "Host" {
+      if (in_block) {
+        flush_block()
+      }
+      if ($2 == host) {
+        in_block = 1
+        replaced = 0
+      }
+      print
+      next
+    }
+
+    in_block && $1 == "IdentityFile" {
+      print "  IdentityFile " key
+      replaced = 1
+      next
+    }
+
+    {
+      print
+      if (in_block) {
+        last_line_empty = ($0 == "")
+      }
+    }
+
+    END {
+      if (in_block) {
+        flush_block()
+      }
+    }
+  ' "$SSH_CONFIG_FILE" > "$tmp_file"
+
+  mv "$tmp_file" "$SSH_CONFIG_FILE"
+}
+
+expand_path() {
+  local raw_path="$1"
+
+  case "$raw_path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${raw_path#~/}"
+      ;;
+    *)
+      printf '%s\n' "$raw_path"
+      ;;
+  esac
+}
+
+ensure_ssh_dir() {
+  mkdir -p "${HOME}/.ssh"
+  chmod 700 "${HOME}/.ssh"
+}
+
+copy_file_to_clipboard() {
+  local path="$1"
+
+  if command -v pbcopy >/dev/null 2>&1; then
+    pbcopy < "$path"
+    return 0
+  fi
+  if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy < "$path"
+    return 0
+  fi
+  if command -v xclip >/dev/null 2>&1; then
+    xclip -selection clipboard < "$path"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_ssh_key() {
+  local label="$1"
+  local owner="$2"
+  local requested_path="$3"
+  local expanded_path pub_path
+
+  expanded_path="$(expand_path "$requested_path")"
+  pub_path="${expanded_path}.pub"
+
+  if [[ -f "$expanded_path" ]]; then
+    info "$label SSH key already exists at $expanded_path"
+    printf '%s\n' "$expanded_path"
+    return 0
+  fi
+
+  if ! prompt_yes_no "No $label SSH key found at $expanded_path. Generate one now?" "y"; then
+    warn "Skipping $label SSH key generation."
+    printf '%s\n' "$expanded_path"
+    return 0
+  fi
+
+  info "Generating $label SSH key..."
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    ensure_ssh_dir
+    ssh-keygen -t ed25519 -C "${owner}-${label}-github" -f "$expanded_path" -N ""
+    chmod 600 "$expanded_path"
+    chmod 644 "$pub_path"
+  else
+    printf '[*] Dry run: ssh-keygen -t ed25519 -C %s -f %s -N ""\n' "${owner}-${label}-github" "$expanded_path"
+  fi
+
+  printf '%s\n' "$expanded_path"
+}
+
+show_public_key_details() {
+  local label="$1"
+  local key_path="$2"
+  local pub_path="${key_path}.pub"
+
+  if [[ ! -f "$pub_path" ]]; then
+    warn "Public key not found for $label at $pub_path"
+    return
+  fi
+
+  printf '\n[*] %s public key (%s):\n' "$label" "$pub_path"
+  cat "$pub_path"
+  printf '\n'
+
+  if copy_file_to_clipboard "$pub_path"; then
+    info "Copied $label public key to clipboard."
+  else
+    warn "No clipboard helper found. Copy the key above into GitHub manually."
+  fi
+}
+
+run_setup() {
+  local personal_owner work_owner personal_dir work_dir personal_host work_host
+  local personal_key work_key personal_current work_current
+
+  info "Interactive git-smart setup"
+  printf '\n'
+
+  personal_owner="$(prompt "Personal GitHub owner" "${GITHUB_PERSONAL_DEFAULT_OWNER:-U17Leetha}")"
+  work_owner="$(prompt "Work GitHub owner" "${GITHUB_WORK_DEFAULT_OWNER:-}")"
+  personal_dir="$(prompt "Personal repos directory" "$GIT_SMART_PERSONAL_DIR")"
+  work_dir="$(prompt "Work repos directory" "$GIT_SMART_WORK_DIR")"
+  personal_host="$(prompt "Personal SSH host alias" "$GITHUB_PERSONAL_HOST")"
+  work_host="$(prompt "Work SSH host alias" "$GITHUB_WORK_HOST")"
+
+  GITHUB_PERSONAL_DEFAULT_OWNER="$personal_owner"
+  GITHUB_WORK_DEFAULT_OWNER="$work_owner"
+  GITHUB_PERSONAL_OWNERS=("$personal_owner")
+  GITHUB_WORK_OWNERS=("$work_owner")
+  GIT_SMART_PERSONAL_DIR="$personal_dir"
+  GIT_SMART_WORK_DIR="$work_dir"
+  GITHUB_PERSONAL_HOST="$personal_host"
+  GITHUB_WORK_HOST="$work_host"
+
+  save_config
+  info "Wrote config to $CONFIG_FILE"
+
+  if prompt_yes_no "Add or update SSH host entries in $SSH_CONFIG_FILE?" "y"; then
+    personal_key="$(prompt "Personal SSH key path" "~/.ssh/id_ed25519_github_personal")"
+    work_key="$(prompt "Work SSH key path" "~/.ssh/id_ed25519_work")"
+    personal_key="$(ensure_ssh_key "personal" "$personal_owner" "$personal_key")"
+    work_key="$(ensure_ssh_key "work" "$work_owner" "$work_key")"
+
+    personal_current="$(current_identity_for_host_config "$GITHUB_PERSONAL_HOST")"
+    if [[ -n "$personal_current" && "$(expand_path "$personal_current")" != "$(expand_path "$personal_key")" ]]; then
+      info "SSH host '$GITHUB_PERSONAL_HOST' currently uses $personal_current"
+      if prompt_yes_no "Update '$GITHUB_PERSONAL_HOST' to use $personal_key?" "y"; then
+        update_ssh_host_identity "$GITHUB_PERSONAL_HOST" "$personal_key"
+      fi
+    else
+      append_ssh_host_if_missing "$GITHUB_PERSONAL_HOST" "$personal_key"
+    fi
+
+    work_current="$(current_identity_for_host_config "$GITHUB_WORK_HOST")"
+    if [[ -n "$work_current" && "$(expand_path "$work_current")" != "$(expand_path "$work_key")" ]]; then
+      info "SSH host '$GITHUB_WORK_HOST' currently uses $work_current"
+      if prompt_yes_no "Update '$GITHUB_WORK_HOST' to use $work_key?" "y"; then
+        update_ssh_host_identity "$GITHUB_WORK_HOST" "$work_key"
+      fi
+    else
+      append_ssh_host_if_missing "$GITHUB_WORK_HOST" "$work_key"
+    fi
+
+    info "Updated SSH config at $SSH_CONFIG_FILE"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      show_public_key_details "personal" "$personal_key"
+      show_public_key_details "work" "$work_key"
+    fi
+  fi
+
+  printf '\n'
+  info "Next steps:"
+  printf '  1. Add the printed public keys to the matching GitHub accounts.\n'
+  printf '  2. ssh -T %s\n' "$GITHUB_PERSONAL_HOST"
+  printf '  3. ssh -T %s\n' "$GITHUB_WORK_HOST"
+  printf '  4. git-smart doctor\n'
+}
+
+ensure_profile_for_creation() {
+  if [[ "$PROFILE" == "auto" ]]; then
+    PROFILE="$(resolve_profile_interactively)"
+  fi
+}
+
+run_init() {
+  local owner base_dir target_dir remote_url use_gh=0
+
+  ensure_profile_for_creation
+
+  if [[ -z "$INIT_NAME" ]]; then
+    INIT_NAME="$(prompt "Repository name")"
+  fi
+
+  owner="$INIT_OWNER"
+  if [[ -z "$owner" ]]; then
+    owner="$(profile_default_owner "$PROFILE")"
+  fi
+  if [[ -z "$owner" ]]; then
+    owner="$(prompt "GitHub owner for this repo")"
+  fi
+
+  base_dir="$(profile_base_dir "$PROFILE")"
+  target_dir="${base_dir}/${INIT_NAME}"
+  remote_url="$(build_remote_url "$owner" "$INIT_NAME" "$PROFILE")"
+
+  info "Profile   : $PROFILE"
+  info "Owner     : $owner"
+  info "Base dir  : $base_dir"
+  info "Repo dir  : $target_dir"
+  info "Remote URL: $remote_url"
+  printf '\n'
+
+  [[ -e "$target_dir" ]] && die "Target directory already exists: $target_dir"
+
+  if command -v gh >/dev/null 2>&1; then
+    if prompt_yes_no "Create the GitHub repo with gh?" "y"; then
+      use_gh=1
+    fi
+  fi
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    mkdir -p "$base_dir" "$target_dir"
+    git -C "$target_dir" init -b main
+    git -C "$target_dir" remote add "$REMOTE" "$remote_url"
+    git -C "$target_dir" config --local git-smart.profile "$PROFILE"
+    git -C "$target_dir" config --local git-smart.owner "$owner"
+    git -C "$target_dir" config --local git-smart.sshHost "$(profile_host "$PROFILE")"
+  fi
+
+  if [[ "$use_gh" -eq 1 ]]; then
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      gh repo create "${owner}/${INIT_NAME}" "--${VISIBILITY}" --source "$target_dir" --remote "$REMOTE" >/dev/null
+      git -C "$target_dir" remote set-url "$REMOTE" "$remote_url"
+    else
+      printf '[*] Dry run: gh repo create %s/%s --%s --source %s --remote %s\n' "$owner" "$INIT_NAME" "$VISIBILITY" "$target_dir" "$REMOTE"
+    fi
+  fi
+
+  info "Repo created at $target_dir"
+  info "Saved profile '$PROFILE' for this repo."
+  info "Remote set to $remote_url"
+  info "Done."
+}
+
+run_clone() {
+  local owner repo target_dir resolved_profile clone_url
+
+  if [[ -z "$CLONE_SPEC" ]]; then
+    CLONE_SPEC="$(prompt "Repository to clone (owner/repo)")"
+  fi
+  [[ "$CLONE_SPEC" =~ ^[^/]+/[^/]+$ ]] || die "clone requires owner/repo format"
+
+  owner="${CLONE_SPEC%%/*}"
+  repo="${CLONE_SPEC##*/}"
+  resolved_profile="$PROFILE"
+
+  if [[ "$resolved_profile" == "auto" ]]; then
+    resolved_profile="$(detect_profile_from_owner "$owner")"
+  fi
+  if [[ "$resolved_profile" == "auto" ]]; then
+    resolved_profile="$(resolve_profile_interactively)"
+  fi
+
+  target_dir="${CLONE_DEST:-$(profile_base_dir "$resolved_profile")/$repo}"
+  [[ -e "$target_dir" ]] && die "Target path already exists: $target_dir"
+
+  clone_url="$(build_remote_url "$owner" "$repo" "$resolved_profile")"
+
+  info "Profile : $resolved_profile"
+  info "Owner   : $owner"
+  info "Repo    : $repo"
+  info "Target  : $target_dir"
+  info "Clone   : $clone_url"
+  printf '\n'
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    mkdir -p "$(dirname "$target_dir")"
+    git clone "$clone_url" "$target_dir"
+    git -C "$target_dir" config --local git-smart.profile "$resolved_profile"
+    git -C "$target_dir" config --local git-smart.owner "$owner"
+    git -C "$target_dir" config --local git-smart.sshHost "$(profile_host "$resolved_profile")"
+  fi
+
+  info "Repo cloned to $target_dir"
+  info "Saved profile '$resolved_profile' for this repo."
+  info "Remote set to $clone_url"
+  info "Done."
+}
+
+show_repo_context() {
+  local identity_file=""
+
+  identity_file="$(identity_for_host "$TARGET_HOST")"
+
+  info "Repo    : $REPO_ROOT"
+  info "Branch  : $BRANCH"
+  info "Remote  : $REMOTE ($REMOTE_URL)"
+  info "Profile : $TARGET_PROFILE"
+  info "Source  : $PROFILE_SOURCE"
+  if [[ -n "$TARGET_OWNER" ]]; then
+    info "Owner   : $TARGET_OWNER"
+  fi
+  info "SSH host: $TARGET_HOST"
+  if [[ -n "$identity_file" ]]; then
+    info "Identity: $identity_file"
+  fi
+  if [[ -n "$COMMIT_MESSAGE" ]]; then
+    info "Message : $COMMIT_MESSAGE"
+  fi
+  printf '\n'
+}
+
+run_push() {
+  local push_args=()
+
+  ensure_repo
+  load_remote_state
+  if [[ -z "$COMMIT_MESSAGE" ]]; then
+    COMMIT_MESSAGE="Update $(date '+%Y-%m-%d %H:%M')"
+  fi
+
+  FORCE_CONTEXT_WRITE=1
+  resolve_repo_context
+  rewrite_remote_if_needed
+  show_repo_context
+  apply_xcode_hygiene
+
+  info "Git status:"
+  git status -sb
+  printf '\n'
+
+  if [[ "$PUSH_ONLY" -eq 0 ]]; then
+    info "Staging changes..."
+    [[ "$DRY_RUN" -eq 1 ]] || git add -A
+
+    printf '\n'
+    info "Git status (staged):"
+    git status -sb
+    printf '\n'
+
+    if git diff --cached --quiet && [[ "$DRY_RUN" -eq 0 ]]; then
+      warn "No staged changes to commit."
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
+      info "Dry run: commit would use message: $COMMIT_MESSAGE"
+    else
+      info "Committing..."
+      git commit -m "$COMMIT_MESSAGE"
+    fi
+  fi
+
+  if [[ "$SET_UPSTREAM" -eq 1 ]]; then
+    push_args+=(-u)
+  fi
+
+  info "Pushing to $REMOTE $BRANCH..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[*] Dry run: git push'
+    if [[ ${#push_args[@]} -gt 0 ]]; then
+      printf ' %s' "${push_args[@]}"
+    fi
+    printf ' %s %s\n' "$REMOTE" "$BRANCH"
+  else
+    git push "${push_args[@]}" "$REMOTE" "$BRANCH"
+  fi
+
+  info "Done."
+}
+
+run_pull() {
+  ensure_repo
+  load_remote_state
+  FORCE_CONTEXT_WRITE=1
+  resolve_repo_context
+  rewrite_remote_if_needed
+  show_repo_context
+
+  info "Pulling from $REMOTE $BRANCH..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[*] Dry run: git pull --ff-only %s %s\n' "$REMOTE" "$BRANCH"
+  else
+    git pull --ff-only "$REMOTE" "$BRANCH"
+  fi
+}
+
+run_status() {
+  ensure_repo
+  load_remote_state
+  resolve_repo_context
+  show_repo_context
+  git status -sb
+}
+
+run_where() {
+  ensure_repo
+  load_remote_state
+  resolve_repo_context
+  printf '%s | %s | %s | %s | %s\n' "$REPO_ROOT" "$TARGET_PROFILE" "$TARGET_OWNER" "$TARGET_HOST" "$REMOTE_URL"
+}
+
+run_open() {
+  local url
+
+  ensure_repo
+  load_remote_state
+
+  if [[ -z "$REMOTE_OWNER" || -z "$REMOTE_REPO" ]]; then
+    die "Current remote is not a recognized GitHub URL."
+  fi
+
+  url="https://github.com/${REMOTE_OWNER}/${REMOTE_REPO}"
+  info "Opening $url"
+  if ! open_url "$url"; then
+    warn "No browser opener found. URL:"
+    printf '%s\n' "$url"
+  fi
+}
+
+run_switch() {
+  local requested_profile requested_owner
+
+  ensure_repo
+  load_remote_state
+
+  requested_profile="$PROFILE"
+  if [[ "$requested_profile" == "auto" ]]; then
+    requested_profile="$(resolve_profile_interactively)"
+  fi
+
+  requested_owner="$INIT_OWNER"
+  if [[ -z "$requested_owner" ]]; then
+    requested_owner="$REMOTE_OWNER"
+  fi
+  if [[ -z "$requested_owner" ]]; then
+    requested_owner="$(profile_default_owner "$requested_profile")"
+  fi
+  if [[ -z "$requested_owner" ]]; then
+    requested_owner="$(prompt "GitHub owner for this repo")"
+  fi
+
+  TARGET_PROFILE="$requested_profile"
+  TARGET_OWNER="$requested_owner"
+  TARGET_HOST="$(profile_host "$requested_profile")"
+  PROFILE_SOURCE="switch"
+
+  [[ -n "$REMOTE_REPO" ]] || die "Current remote is not a recognized GitHub URL."
+
+  rewrite_remote_if_needed
+  write_repo_context "$TARGET_PROFILE" "$TARGET_OWNER" "$TARGET_HOST"
+  show_repo_context
+  info "Saved new repo context."
+}
+
+run_doctor() {
+  local current_url="" identity_personal="" identity_work="" repo_profile="" repo_owner="" repo_host=""
+  local suggestions=()
+
+  info "Config file        : $CONFIG_FILE"
+  info "Personal base dir  : $GIT_SMART_PERSONAL_DIR"
+  info "Work base dir      : $GIT_SMART_WORK_DIR"
+  info "Personal SSH host  : $GITHUB_PERSONAL_HOST"
+  info "Work SSH host      : $GITHUB_WORK_HOST"
+  info "Personal owners    : ${GITHUB_PERSONAL_OWNERS[*]:-(none)}"
+  info "Work owners        : ${GITHUB_WORK_OWNERS[*]:-(none)}"
+  printf '\n'
+
+  identity_personal="$(identity_for_host "$GITHUB_PERSONAL_HOST")"
+  identity_work="$(identity_for_host "$GITHUB_WORK_HOST")"
+
+  if [[ -n "$identity_personal" ]]; then
+    info "Personal identity: $identity_personal"
+  else
+    suggestions+=("Add SSH config for '$GITHUB_PERSONAL_HOST' so personal repos use the correct key.")
+  fi
+
+  if [[ -n "$identity_work" ]]; then
+    info "Work identity    : $identity_work"
+  else
+    suggestions+=("Add SSH config for '$GITHUB_WORK_HOST' so work repos use the correct key.")
+  fi
+  printf '\n'
+
+  if [[ ${#GITHUB_PERSONAL_OWNERS[@]} -eq 0 ]]; then
+    suggestions+=("Set GITHUB_PERSONAL_OWNERS in $CONFIG_FILE.")
+  fi
+  if [[ ${#GITHUB_WORK_OWNERS[@]} -eq 0 ]]; then
+    suggestions+=("Set GITHUB_WORK_OWNERS in $CONFIG_FILE.")
+  fi
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    ensure_repo
+    current_url="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
+    repo_profile="$(repo_get git-smart.profile)"
+    repo_owner="$(repo_get git-smart.owner)"
+    repo_host="$(repo_get git-smart.sshHost)"
+
+    info "Repo status       : inside git repo"
+    info "Repo root         : $REPO_ROOT"
+    if [[ -n "$current_url" ]]; then
+      info "Remote $REMOTE       : $current_url"
+    else
+      warn "Remote '$REMOTE' not found."
+    fi
+    info "Repo profile      : ${repo_profile:-"(unset)"}"
+    info "Repo owner        : ${repo_owner:-"(unset)"}"
+    info "Repo sshHost      : ${repo_host:-"(unset)"}"
+
+    if [[ -z "$repo_profile" ]]; then
+      suggestions+=("This repo has no saved git-smart profile yet. Run 'git-smart push --profile personal --push-only' or 'git-smart push --profile work --push-only' once to save it.")
+    fi
+    if [[ -n "$current_url" && "$current_url" =~ ^https://github\.com/ ]]; then
+      suggestions+=("This repo still uses an HTTPS remote. Run 'git-smart push --push-only' after repo context is configured to rewrite it.")
+    fi
+  else
+    warn "Not currently inside a git repo."
+    suggestions+=("Run 'git-smart setup' first, then use 'git-smart init' or 'git-smart clone'.")
+  fi
+
+  if [[ ${#suggestions[@]} -gt 0 ]]; then
+    printf '\n[*] Suggestions:\n'
+    local suggestion
+    for suggestion in "${suggestions[@]}"; do
+      printf '  - %s\n' "$suggestion"
+    done
+  fi
+}
+
+main() {
+  load_config
+  parse_global_args "$@"
+
+  case "$COMMAND" in
+    setup) run_setup ;;
+    init) run_init ;;
+    clone) run_clone ;;
+    push) run_push ;;
+    pull) run_pull ;;
+    status) run_status ;;
+    where) run_where ;;
+    open) run_open ;;
+    switch) run_switch ;;
+    doctor) run_doctor ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"
