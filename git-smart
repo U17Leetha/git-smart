@@ -1077,6 +1077,7 @@ apply_global_profile() {
 
   GIT_SMART_GLOBAL_PROFILE="$profile"
   [[ "$DRY_RUN" -eq 0 ]] && save_config
+  return 0
 }
 
 run_global() {
