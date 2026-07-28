@@ -8,6 +8,7 @@ GitHub helper for laptops with both personal and work repos.
 - personal/work repo directory management
 - SSH host alias management
 - optional GitHub SSH key generation
+- machine-wide default profile (SSH host + git identity) for tools outside git-smart
 - repo-local context storage
 - simple daily commands for push, pull, status, open, and context lookup
 
@@ -23,6 +24,7 @@ git-smart status
 git-smart where
 git-smart open
 git-smart switch --profile work
+git-smart global --profile work
 git-smart doctor
 ```
 
@@ -52,6 +54,7 @@ git-smart doctor
 - prompt for personal and work repo directories
 - add or update SSH host aliases in `~/.ssh/config`
 - generate missing personal and work SSH keys
+- optionally set one profile as the machine-wide default (SSH + git identity)
 - print the public keys you need to add to GitHub
 
 ## Repo context
@@ -69,6 +72,28 @@ git-smart push
 git-smart pull
 git-smart status
 ```
+
+## Global default profile
+
+Repos managed by `git-smart` (via `init`/`clone`/`switch`/`push`) always resolve
+their own SSH key and remote correctly, regardless of any global default.
+
+Anything *outside* git-smart's control — a plain `git@github.com:...` clone,
+`gh`, or any tool that doesn't go through this CLI — falls back to whatever the
+bare `Host github.com` entry in `~/.ssh/config` and your global
+`~/.gitconfig` say. `git-smart global` lets you pin that fallback to one
+profile explicitly:
+
+```bash
+git-smart global --profile work
+```
+
+This updates the bare `github.com` SSH host to that profile's key, sets
+`git config --global user.name`/`user.email` from
+`GIT_SMART_WORK_GIT_NAME`/`GIT_SMART_WORK_GIT_EMAIL`, and remembers your
+choice in `GIT_SMART_GLOBAL_PROFILE`. `git-smart doctor` reports drift if the
+bare host or global git identity later stop matching. `git-smart setup` also
+offers to configure this during onboarding.
 
 ## Dependencies
 
@@ -109,6 +134,10 @@ GITHUB_WORK_OWNERS=(Strong-Crypto-Innovations)
 
 GITHUB_PERSONAL_DEFAULT_OWNER="U17Leetha"
 GITHUB_WORK_DEFAULT_OWNER="Strong-Crypto-Innovations"
+
+GIT_SMART_GLOBAL_PROFILE="work"
+GIT_SMART_WORK_GIT_NAME="Matt Prater"
+GIT_SMART_WORK_GIT_EMAIL="matt.prater@strongcrypto.com"
 ```
 
 ## Files
