@@ -1357,7 +1357,7 @@ run_here() {
 
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     toplevel="$(git rev-parse --show-toplevel)"
-    if [[ "$toplevel" != "$PWD" ]]; then
+    if [[ "$toplevel" != "$(pwd -P)" ]]; then
       die "This directory is inside an existing repo at $toplevel. Run 'git-smart here' from a directory that isn't nested inside another repo."
     fi
   else
