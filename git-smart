@@ -9,6 +9,8 @@ fi
 PROGRAM_NAME="git-smart"
 CONFIG_FILE="${HOME}/.config/git-smart.conf"
 SSH_CONFIG_FILE="${HOME}/.ssh/config"
+GIT_SMART_SSH_INCLUDE_DIR="${HOME}/.ssh/config.d"
+GIT_SMART_SSH_INCLUDE_FILE="${GIT_SMART_SSH_INCLUDE_DIR}/git-smart"
 
 DEFAULT_PERSONAL_HOST="github-personal"
 DEFAULT_WORK_HOST="github-work"
@@ -933,35 +935,11 @@ EOF
   fi
 }
 
-append_ssh_host_if_missing() {
-  local host_alias="$1"
-  local key_path="$2"
-
-  mkdir -p "$(dirname "$SSH_CONFIG_FILE")"
-  touch "$SSH_CONFIG_FILE"
-
-  if grep -Eq "^Host[[:space:]]+${host_alias}$" "$SSH_CONFIG_FILE"; then
-    info "SSH host '$host_alias' already exists in $SSH_CONFIG_FILE"
-    return
-  fi
-
-  cat >> "$SSH_CONFIG_FILE" <<EOF
-
-Host $host_alias
-  HostName github.com
-  User git
-  IdentityFile $key_path
-  AddKeysToAgent yes
-  UseKeychain yes
-  IdentitiesOnly yes
-EOF
-}
-
 current_identity_for_host_config() {
   local host_alias="$1"
   local line
 
-  if [[ ! -f "$SSH_CONFIG_FILE" ]]; then
+  if [[ ! -f "$GIT_SMART_SSH_INCLUDE_FILE" ]]; then
     return 0
   fi
 
@@ -969,70 +947,90 @@ current_identity_for_host_config() {
     $1 == "Host" && $2 == host { in_block=1; next }
     $1 == "Host" && in_block { exit }
     in_block && $1 == "IdentityFile" { print $2; exit }
-  ' "$SSH_CONFIG_FILE")"
+  ' "$GIT_SMART_SSH_INCLUDE_FILE")"
 
   printf '%s\n' "$line"
 }
 
-update_ssh_host_identity() {
-  local host_alias="$1"
-  local key_path="$2"
+# Ensures ~/.ssh/config starts with an Include pointing at git-smart's own
+# dedicated file. Placing it first means git-smart's blocks are always tried
+# before anything else the user has configured -- ssh_config is first-match-
+# wins, so this is what makes git-smart's identity choices authoritative
+# instead of silently losing to an earlier Host * block.
+ensure_ssh_include() {
+  local include_line="Include ~/.ssh/config.d/git-smart"
   local tmp_file
 
-  tmp_file="$(mktemp)"
+  mkdir -p "$(dirname "$SSH_CONFIG_FILE")"
+  touch "$SSH_CONFIG_FILE"
 
-  awk -v host="$host_alias" -v key="$key_path" '
-    function flush_block() {
-      if (!in_block) {
-        return
-      }
+  if grep -qF "$include_line" "$SSH_CONFIG_FILE"; then
+    return 0
+  fi
 
-      if (!replaced) {
-        if (last_line_empty == 0) {
-          print "  IdentityFile " key
-        } else {
-          print "  IdentityFile " key
-        }
-      }
-
-      in_block = 0
-      replaced = 0
-      last_line_empty = 0
-    }
-
-    $1 == "Host" {
-      if (in_block) {
-        flush_block()
-      }
-      if ($2 == host) {
-        in_block = 1
-        replaced = 0
-      }
-      print
-      next
-    }
-
-    in_block && $1 == "IdentityFile" {
-      print "  IdentityFile " key
-      replaced = 1
-      next
-    }
-
-    {
-      print
-      if (in_block) {
-        last_line_empty = ($0 == "")
-      }
-    }
-
-    END {
-      if (in_block) {
-        flush_block()
-      }
-    }
-  ' "$SSH_CONFIG_FILE" > "$tmp_file"
-
+  tmp_file="$(mktemp "${SSH_CONFIG_FILE}.XXXXXX")"
+  {
+    printf '%s\n\n' "$include_line"
+    cat "$SSH_CONFIG_FILE"
+  } > "$tmp_file"
   mv "$tmp_file" "$SSH_CONFIG_FILE"
+}
+
+ssh_host_block() {
+  local host_alias="$1"
+  local key_path="$2"
+
+  printf 'Host %s\n' "$host_alias"
+  printf '  HostName github.com\n'
+  printf '  User git\n'
+  printf '  IdentityFile %s\n' "$key_path"
+  printf '  AddKeysToAgent yes\n'
+  printf '  IdentitiesOnly yes\n'
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf '  UseKeychain yes\n'
+  fi
+  printf '\n'
+}
+
+# Regenerates the entire dedicated file from git-smart's own known state
+# (all three possible aliases), rather than surgically editing arbitrary
+# text -- since git-smart fully owns this file, "update" is just "rewrite
+# it correctly," which removes an entire class of parsing bugs.
+write_git_smart_ssh_host() {
+  local target_host="$1"
+  local target_key="$2"
+  local personal_key work_key default_key tmp_file
+
+  personal_key="$(current_identity_for_host_config "$GITHUB_PERSONAL_HOST")"
+  work_key="$(current_identity_for_host_config "$GITHUB_WORK_HOST")"
+  default_key="$(current_identity_for_host_config "$GITHUB_DEFAULT_HOST")"
+
+  case "$target_host" in
+    "$GITHUB_PERSONAL_HOST") personal_key="$target_key" ;;
+    "$GITHUB_WORK_HOST") work_key="$target_key" ;;
+    "$GITHUB_DEFAULT_HOST") default_key="$target_key" ;;
+  esac
+
+  ensure_ssh_include
+
+  mkdir -p "$GIT_SMART_SSH_INCLUDE_DIR"
+  chmod 700 "$GIT_SMART_SSH_INCLUDE_DIR"
+  touch "$GIT_SMART_SSH_INCLUDE_FILE"
+
+  tmp_file="$(mktemp "${GIT_SMART_SSH_INCLUDE_FILE}.XXXXXX")"
+  {
+    if [[ -n "$personal_key" ]]; then
+      ssh_host_block "$GITHUB_PERSONAL_HOST" "$personal_key"
+    fi
+    if [[ -n "$work_key" ]]; then
+      ssh_host_block "$GITHUB_WORK_HOST" "$work_key"
+    fi
+    if [[ -n "$default_key" ]]; then
+      ssh_host_block "$GITHUB_DEFAULT_HOST" "$default_key"
+    fi
+  } > "$tmp_file"
+  chmod 600 "$tmp_file"
+  mv "$tmp_file" "$GIT_SMART_SSH_INCLUDE_FILE"
 }
 
 expand_path() {
@@ -1139,7 +1137,7 @@ show_public_key_details() {
 
 apply_global_profile() {
   local profile="$1"
-  local host_alias key_path current_default host_exists git_name git_email
+  local host_alias key_path git_name git_email
 
   host_alias="$(profile_host "$profile")"
   key_path="$(current_identity_for_host_config "$host_alias")"
@@ -1148,24 +1146,10 @@ apply_global_profile() {
 
   info "Applying '$profile' as the global default profile"
 
-  host_exists=0
-  if [[ -f "$SSH_CONFIG_FILE" ]] && grep -Eq "^Host[[:space:]]+${GITHUB_DEFAULT_HOST}$" "$SSH_CONFIG_FILE"; then
-    host_exists=1
-  fi
-  current_default="$(current_identity_for_host_config "$GITHUB_DEFAULT_HOST")"
-
-  if [[ "$host_exists" -eq 0 ]]; then
-    if [[ "$DRY_RUN" -eq 0 ]]; then
-      append_ssh_host_if_missing "$GITHUB_DEFAULT_HOST" "$key_path"
-    else
-      printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_DEFAULT_HOST" "$key_path"
-    fi
-  elif [[ "$(expand_path "$current_default")" != "$(expand_path "$key_path")" ]]; then
-    if [[ "$DRY_RUN" -eq 0 ]]; then
-      update_ssh_host_identity "$GITHUB_DEFAULT_HOST" "$key_path"
-    else
-      printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_DEFAULT_HOST" "$key_path"
-    fi
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    write_git_smart_ssh_host "$GITHUB_DEFAULT_HOST" "$key_path"
+  else
+    printf '[*] Dry run: set Host %s IdentityFile to %s\n' "$GITHUB_DEFAULT_HOST" "$key_path"
   fi
   info "SSH default (Host $GITHUB_DEFAULT_HOST) -> $key_path"
 
@@ -1218,7 +1202,7 @@ run_global() {
 
 run_setup() {
   local personal_owner work_owner personal_dir work_dir personal_host work_host
-  local personal_key work_key personal_current work_current
+  local personal_key work_key
   local global_profile
   local is_first_run=0
 
@@ -1288,40 +1272,18 @@ run_setup() {
     personal_key="$(ensure_ssh_key "personal" "$personal_owner" "$personal_key")"
     work_key="$(ensure_ssh_key "work" "$work_owner" "$work_key")"
 
-    personal_current="$(current_identity_for_host_config "$GITHUB_PERSONAL_HOST")"
-    if [[ -n "$personal_current" && "$(expand_path "$personal_current")" != "$(expand_path "$personal_key")" ]]; then
-      info "SSH host '$GITHUB_PERSONAL_HOST' currently uses $personal_current"
-      if prompt_yes_no "Update '$GITHUB_PERSONAL_HOST' to use $personal_key?" "y"; then
-        if [[ "$DRY_RUN" -eq 0 ]]; then
-          update_ssh_host_identity "$GITHUB_PERSONAL_HOST" "$personal_key"
-        else
-          printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_PERSONAL_HOST" "$personal_key"
-        fi
-      fi
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      write_git_smart_ssh_host "$GITHUB_PERSONAL_HOST" "$personal_key"
+      info "SSH host '$GITHUB_PERSONAL_HOST' -> $personal_key"
     else
-      if [[ "$DRY_RUN" -eq 0 ]]; then
-        append_ssh_host_if_missing "$GITHUB_PERSONAL_HOST" "$personal_key"
-      else
-        printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_PERSONAL_HOST" "$personal_key"
-      fi
+      printf '[*] Dry run: set Host %s IdentityFile to %s\n' "$GITHUB_PERSONAL_HOST" "$personal_key"
     fi
 
-    work_current="$(current_identity_for_host_config "$GITHUB_WORK_HOST")"
-    if [[ -n "$work_current" && "$(expand_path "$work_current")" != "$(expand_path "$work_key")" ]]; then
-      info "SSH host '$GITHUB_WORK_HOST' currently uses $work_current"
-      if prompt_yes_no "Update '$GITHUB_WORK_HOST' to use $work_key?" "y"; then
-        if [[ "$DRY_RUN" -eq 0 ]]; then
-          update_ssh_host_identity "$GITHUB_WORK_HOST" "$work_key"
-        else
-          printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_WORK_HOST" "$work_key"
-        fi
-      fi
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      write_git_smart_ssh_host "$GITHUB_WORK_HOST" "$work_key"
+      info "SSH host '$GITHUB_WORK_HOST' -> $work_key"
     else
-      if [[ "$DRY_RUN" -eq 0 ]]; then
-        append_ssh_host_if_missing "$GITHUB_WORK_HOST" "$work_key"
-      else
-        printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_WORK_HOST" "$work_key"
-      fi
+      printf '[*] Dry run: set Host %s IdentityFile to %s\n' "$GITHUB_WORK_HOST" "$work_key"
     fi
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
@@ -1829,6 +1791,7 @@ run_doctor() {
   local current_url="" identity_personal="" identity_work="" repo_profile="" repo_owner="" repo_host=""
   local expected_default_key="" actual_default_key="" expected_git_name="" expected_git_email=""
   local actual_git_name="" actual_git_email=""
+  local intended_personal="" intended_work=""
   local suggestions=()
 
   info "Config file        : $CONFIG_FILE"
@@ -1842,17 +1805,29 @@ run_doctor() {
 
   identity_personal="$(identity_for_host "$GITHUB_PERSONAL_HOST")"
   identity_work="$(identity_for_host "$GITHUB_WORK_HOST")"
+  intended_personal="$(current_identity_for_host_config "$GITHUB_PERSONAL_HOST")"
+  intended_work="$(current_identity_for_host_config "$GITHUB_WORK_HOST")"
 
   if [[ -n "$identity_personal" ]]; then
     info "Personal identity: $identity_personal"
+    if [[ -n "$intended_personal" && "$(expand_path "$identity_personal")" != "$(expand_path "$intended_personal")" ]]; then
+      suggestions+=("SSH for '$GITHUB_PERSONAL_HOST' resolves to '$identity_personal', not the configured '$intended_personal' -- something earlier in $SSH_CONFIG_FILE may be shadowing it.")
+    fi
   else
     suggestions+=("Add SSH config for '$GITHUB_PERSONAL_HOST' so personal repos use the correct key.")
   fi
 
   if [[ -n "$identity_work" ]]; then
     info "Work identity    : $identity_work"
+    if [[ -n "$intended_work" && "$(expand_path "$identity_work")" != "$(expand_path "$intended_work")" ]]; then
+      suggestions+=("SSH for '$GITHUB_WORK_HOST' resolves to '$identity_work', not the configured '$intended_work' -- something earlier in $SSH_CONFIG_FILE may be shadowing it.")
+    fi
   else
     suggestions+=("Add SSH config for '$GITHUB_WORK_HOST' so work repos use the correct key.")
+  fi
+
+  if ! grep -qF "Include ~/.ssh/config.d/git-smart" "$SSH_CONFIG_FILE" 2>/dev/null; then
+    suggestions+=("$SSH_CONFIG_FILE is missing 'Include ~/.ssh/config.d/git-smart'. Run 'git-smart setup' or 'git-smart global' again to fix it.")
   fi
   printf '\n'
 
