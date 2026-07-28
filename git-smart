@@ -17,6 +17,7 @@ REMOTE="origin"
 DRY_RUN=0
 SET_UPSTREAM=0
 PUSH_ONLY=0
+SKIP_CONFIRM=0
 COMMIT_MESSAGE=""
 INIT_NAME=""
 INIT_OWNER=""
@@ -180,9 +181,12 @@ Options:
   --remote NAME
   --push-only
   --set-upstream
+  --yes, -y      Skip the confirmation before committing
   --dry-run
 
-Normally you should not need --profile after the repo has been initialized or cloned with git-smart.
+Before committing, push shows a summary of what's staged and asks for
+confirmation unless --yes/-y is given. Normally you should not need
+--profile after the repo has been initialized or cloned with git-smart.
 EOF
 }
 
@@ -428,6 +432,9 @@ parse_command_args() {
             ;;
           --set-upstream)
             SET_UPSTREAM=1
+            ;;
+          --yes|-y)
+            SKIP_CONFIRM=1
             ;;
           *)
             break
@@ -1533,6 +1540,15 @@ run_push() {
     elif [[ "$DRY_RUN" -eq 1 ]]; then
       info "Dry run: commit would use message: $COMMIT_MESSAGE"
     else
+      info "Changes to be committed:"
+      git diff --cached --stat
+      printf '\n'
+
+      if [[ "$SKIP_CONFIRM" -eq 0 ]] && ! prompt_yes_no "Commit these changes with message \"$COMMIT_MESSAGE\"?" "y"; then
+        git reset >/dev/null
+        die "Push cancelled."
+      fi
+
       info "Committing..."
       git commit -m "$COMMIT_MESSAGE"
     fi
