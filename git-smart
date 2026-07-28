@@ -1549,11 +1549,12 @@ run_fork() {
   local owner repo fork_owner target_dir clone_url upstream_url
 
   require_gh
-  ensure_profile_for_creation
 
   [[ "$FORK_SPEC" =~ ^[^/]+/[^/]+$ ]] || die "fork requires owner/repo format"
   owner="${FORK_SPEC%%/*}"
   repo="${FORK_SPEC##*/}"
+
+  ensure_profile_for_creation
 
   # Both checks run before the mutating gh repo fork call below, so a
   # local collision (or gh not being authenticated) is caught before
@@ -1590,6 +1591,7 @@ run_fork() {
 
   info "Fork cloned to $target_dir"
   info "Saved profile '$PROFILE' for this repo."
+  info "Note: 'upstream' points at the original repo -- avoid 'git-smart push/pull --remote upstream' here, it won't target your fork."
   info "Done."
 }
 

@@ -109,7 +109,9 @@ directory, adds an `upstream` remote pointing at the original repo, and
 saves repo-local context the same way `init`/`clone` do. The fork always
 goes to whichever account `gh` is authenticated as -- `--profile` only
 controls the local directory and SSH host alias used for the fork's own
-remote.
+remote. `upstream` is read-only from git-smart's perspective -- avoid
+`--remote upstream` on `push`/`pull` here, since that would target the
+original repo instead of your fork.
 
 `pr` also requires `gh`. With no flags it delegates to `gh pr create`,
 opening a pull request for the current branch. `pr --status` delegates to
