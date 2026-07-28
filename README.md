@@ -9,6 +9,7 @@ GitHub helper for laptops with both personal and work repos.
 - SSH host alias management
 - optional GitHub SSH key generation
 - machine-wide default profile (SSH host + git identity) for tools outside git-smart
+- attach an existing directory to a profile in place
 - repo-local context storage
 - simple daily commands for push, pull, status, open, and context lookup
 
@@ -18,6 +19,7 @@ GitHub helper for laptops with both personal and work repos.
 git-smart setup
 git-smart init
 git-smart clone owner/repo
+git-smart here --profile personal
 git-smart push
 git-smart pull
 git-smart status
@@ -72,6 +74,22 @@ git-smart push
 git-smart pull
 git-smart status
 ```
+
+## Attaching an existing directory
+
+If you `cd` into a directory that has no git repo yet (or has one but no
+remote configured) and want to bind it to a profile:
+
+```bash
+git-smart here --profile personal
+```
+
+This runs `git init` if needed (skipping it if the directory is already a
+repo rooted there), adds the remote (the GitHub repo must already exist --
+`here` doesn't create it for you), and saves the same repo-local context
+`switch` does. If a remote is already configured, `here` refuses and points
+you at `git-smart switch` instead, which is the right tool for rebinding an
+already-remoted repo.
 
 ## Global default profile
 
