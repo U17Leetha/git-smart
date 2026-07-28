@@ -10,6 +10,7 @@ GitHub helper for laptops with both personal and work repos.
 - optional GitHub SSH key generation
 - machine-wide default profile (SSH host + git identity) for tools outside git-smart
 - attach an existing directory to a profile in place
+- fork a repo and open pull requests without leaving the terminal
 - repo-local context storage
 - simple daily commands for push, pull, status, open, and context lookup
 
@@ -19,9 +20,11 @@ GitHub helper for laptops with both personal and work repos.
 git-smart setup
 git-smart init
 git-smart clone owner/repo
+git-smart fork owner/repo
 git-smart here --profile personal
 git-smart push
 git-smart pull
+git-smart pr
 git-smart status
 git-smart where
 git-smart open
@@ -92,6 +95,27 @@ you at `git-smart switch` instead, which is the right tool for rebinding an
 already-remoted repo. It also refuses if the current directory is nested
 inside another repo's working tree.
 
+## Forking and pull requests
+
+```bash
+git-smart fork owner/repo --profile personal
+git-smart pr
+git-smart pr --status
+```
+
+`fork` requires the `gh` CLI to be installed and authenticated. It forks
+`owner/repo` on GitHub, clones your fork into the correct personal/work
+directory, adds an `upstream` remote pointing at the original repo, and
+saves repo-local context the same way `init`/`clone` do. The fork always
+goes to whichever account `gh` is authenticated as -- `--profile` only
+controls the local directory and SSH host alias used for the fork's own
+remote.
+
+`pr` also requires `gh`. With no flags it delegates to `gh pr create`,
+opening a pull request for the current branch. `pr --status` delegates to
+`gh pr view` instead, showing the pull request for the current branch if
+one exists.
+
 ## Global default profile
 
 Repos managed by `git-smart` (via `init`/`clone`/`switch`/`push`) always resolve
@@ -125,7 +149,7 @@ Required:
 
 Optional:
 
-- `gh` for GitHub repo creation during `git-smart init`
+- `gh` for GitHub repo creation during `git-smart init`, and required for `git-smart fork` and `git-smart pr`
 - `pbcopy` on macOS for clipboard support during `git-smart setup`
 - `open` on macOS for `git-smart open`
 - `xdg-open` on Linux for `git-smart open`
