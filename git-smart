@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( BASH_VERSINFO[0] < 4 )); then
-  printf '[!] git-smart requires bash >= 4 (found %s). On macOS: brew install bash\n' "$BASH_VERSION" >&2
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  printf '[!] git-smart requires bash >= 4.4 (found %s). On macOS: brew install bash\n' "$BASH_VERSION" >&2
   exit 1
 fi
 
@@ -65,10 +65,10 @@ prompt() {
   local input=""
 
   if [[ -n "$default_value" ]]; then
-    read -r -p "$prompt_text [$default_value]: " input
+    read -r -p "$prompt_text [$default_value]: " input || die "No input available (stdin closed)."
     printf '%s\n' "${input:-$default_value}"
   else
-    read -r -p "$prompt_text: " input
+    read -r -p "$prompt_text: " input || die "No input available (stdin closed)."
     printf '%s\n' "$input"
   fi
 }
@@ -80,10 +80,10 @@ prompt_yes_no() {
 
   while true; do
     if [[ "$default_answer" == "y" ]]; then
-      read -r -p "$prompt_text [Y/n]: " input
+      read -r -p "$prompt_text [Y/n]: " input || return 1
       input="${input:-y}"
     else
-      read -r -p "$prompt_text [y/N]: " input
+      read -r -p "$prompt_text [y/N]: " input || return 1
       input="${input:-n}"
     fi
 
@@ -309,6 +309,11 @@ EOF
 
 load_config() {
   if [[ -f "$CONFIG_FILE" ]]; then
+    local perms
+    perms="$(stat -f '%Lp' "$CONFIG_FILE" 2>/dev/null || stat -c '%a' "$CONFIG_FILE" 2>/dev/null)"
+    if [[ -n "$perms" && "${perms: -2}" != "00" ]]; then
+      die "$CONFIG_FILE is group/world accessible (permissions: $perms). Run 'chmod 600 $CONFIG_FILE' before continuing."
+    fi
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
   fi
@@ -336,29 +341,38 @@ load_config() {
 
 save_config() {
   local personal_owner work_owner
+  local personal_owners_quoted="" work_owners_quoted="" owner
 
   mkdir -p "$(dirname "$CONFIG_FILE")"
 
   personal_owner="${GITHUB_PERSONAL_DEFAULT_OWNER:-}"
   work_owner="${GITHUB_WORK_DEFAULT_OWNER:-}"
 
-  cat > "$CONFIG_FILE" <<EOF
-GIT_SMART_PERSONAL_DIR="$GIT_SMART_PERSONAL_DIR"
-GIT_SMART_WORK_DIR="$GIT_SMART_WORK_DIR"
+  for owner in "${GITHUB_PERSONAL_OWNERS[@]}"; do
+    personal_owners_quoted+="$(printf '%q ' "$owner")"
+  done
+  for owner in "${GITHUB_WORK_OWNERS[@]}"; do
+    work_owners_quoted+="$(printf '%q ' "$owner")"
+  done
 
-GITHUB_PERSONAL_HOST="$GITHUB_PERSONAL_HOST"
-GITHUB_WORK_HOST="$GITHUB_WORK_HOST"
-
-GITHUB_PERSONAL_OWNERS=(${GITHUB_PERSONAL_OWNERS[*]})
-GITHUB_WORK_OWNERS=(${GITHUB_WORK_OWNERS[*]})
-
-GITHUB_PERSONAL_DEFAULT_OWNER="$personal_owner"
-GITHUB_WORK_DEFAULT_OWNER="$work_owner"
-
-GIT_SMART_GLOBAL_PROFILE="$GIT_SMART_GLOBAL_PROFILE"
-GIT_SMART_WORK_GIT_NAME="$GIT_SMART_WORK_GIT_NAME"
-GIT_SMART_WORK_GIT_EMAIL="$GIT_SMART_WORK_GIT_EMAIL"
-EOF
+  {
+    printf 'GIT_SMART_PERSONAL_DIR=%q\n' "$GIT_SMART_PERSONAL_DIR"
+    printf 'GIT_SMART_WORK_DIR=%q\n' "$GIT_SMART_WORK_DIR"
+    printf '\n'
+    printf 'GITHUB_PERSONAL_HOST=%q\n' "$GITHUB_PERSONAL_HOST"
+    printf 'GITHUB_WORK_HOST=%q\n' "$GITHUB_WORK_HOST"
+    printf '\n'
+    printf 'GITHUB_PERSONAL_OWNERS=(%s)\n' "$personal_owners_quoted"
+    printf 'GITHUB_WORK_OWNERS=(%s)\n' "$work_owners_quoted"
+    printf '\n'
+    printf 'GITHUB_PERSONAL_DEFAULT_OWNER=%q\n' "$personal_owner"
+    printf 'GITHUB_WORK_DEFAULT_OWNER=%q\n' "$work_owner"
+    printf '\n'
+    printf 'GIT_SMART_GLOBAL_PROFILE=%q\n' "$GIT_SMART_GLOBAL_PROFILE"
+    printf 'GIT_SMART_WORK_GIT_NAME=%q\n' "$GIT_SMART_WORK_GIT_NAME"
+    printf 'GIT_SMART_WORK_GIT_EMAIL=%q\n' "$GIT_SMART_WORK_GIT_EMAIL"
+  } > "$CONFIG_FILE"
+  chmod 600 "$CONFIG_FILE"
 }
 
 parse_global_args() {
@@ -752,7 +766,7 @@ resolve_profile_interactively() {
   local answer=""
 
   while true; do
-    read -r -p "Use personal or work profile? [personal/work]: " answer
+    read -r -p "Use personal or work profile? [personal/work]: " answer || die "No input available (stdin closed). Pass --profile personal|work."
     case "${answer,,}" in
       personal|p)
         printf 'personal\n'
@@ -865,6 +879,12 @@ rewrite_remote_if_needed() {
   new_url="$(build_remote_url "$TARGET_OWNER" "$REMOTE_REPO" "$TARGET_PROFILE")"
   if [[ "$REMOTE_URL" == "$new_url" ]]; then
     return
+  fi
+
+  if [[ -n "$REMOTE_OWNER" && "$TARGET_OWNER" != "$REMOTE_OWNER" ]]; then
+    warn "The remote's current owner is '$REMOTE_OWNER', but git-smart is about to retarget it to '$TARGET_OWNER'."
+    prompt_yes_no "Retarget $REMOTE from ${REMOTE_OWNER}/${REMOTE_REPO} to ${TARGET_OWNER}/${REMOTE_REPO}?" "n" \
+      || die "Aborted. If '$REMOTE_OWNER' is correct, run 'git-smart switch --owner $REMOTE_OWNER' to fix the saved context instead."
   fi
 
   info "Updating $REMOTE remote to use profile '$TARGET_PROFILE'"
@@ -1621,6 +1641,10 @@ run_push() {
   printf '\n'
 
   if [[ "$PUSH_ONLY" -eq 0 ]]; then
+    if [[ "$DRY_RUN" -eq 0 ]] && ! git diff --cached --quiet; then
+      die "You already have staged changes. Commit them yourself first, or run 'git-smart push --push-only' to push without staging/committing anything new."
+    fi
+
     info "Staging changes..."
     [[ "$DRY_RUN" -eq 1 ]] || git add -A
 
