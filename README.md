@@ -57,7 +57,7 @@ git-smart doctor
 
 - prompt for personal and work GitHub owners
 - prompt for personal and work repo directories
-- add or update SSH host aliases in `~/.ssh/config`
+- add or update SSH host aliases in `~/.ssh/config.d/git-smart` (referenced from `~/.ssh/config` via a single `Include` line)
 - generate missing personal and work SSH keys
 - optionally set one profile as the machine-wide default (SSH host + git identity)
 - print the public keys you need to add to GitHub
@@ -125,7 +125,7 @@ their own SSH key and remote correctly, regardless of any global default.
 
 Anything outside git-smart's control — a plain `git@github.com:...` clone,
 `gh`, or any tool that doesn't go through this CLI — falls back to whatever the
-bare `Host github.com` entry in `~/.ssh/config` and your global
+bare `Host github.com` entry (in git-smart's own `~/.ssh/config.d/git-smart`) and your global
 `~/.gitconfig` say. `git-smart global` lets you pin that fallback to one
 profile explicitly:
 
