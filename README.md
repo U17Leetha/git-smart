@@ -98,7 +98,7 @@ inside another repo's working tree.
 ## Forking and pull requests
 
 ```bash
-git-smart fork owner/repo --profile personal
+git-smart fork --profile personal owner/repo
 git-smart pr
 git-smart pr --status
 ```

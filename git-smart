@@ -1555,12 +1555,14 @@ run_fork() {
   owner="${FORK_SPEC%%/*}"
   repo="${FORK_SPEC##*/}"
 
-  # Resolved before the mutating gh repo fork call below, so a local
-  # collision (or gh not being authenticated) is caught before anything
-  # is created on GitHub -- avoids leaving an orphaned fork behind.
-  fork_owner="$(gh api user --jq .login)"
+  # Both checks run before the mutating gh repo fork call below, so a
+  # local collision (or gh not being authenticated) is caught before
+  # anything is created on GitHub -- avoids leaving an orphaned fork
+  # behind. target_dir is checked first since it's free and local,
+  # before paying for the gh api user network round-trip.
   target_dir="$(profile_base_dir "$PROFILE")/$repo"
   [[ -e "$target_dir" ]] && die "Target directory already exists: $target_dir"
+  fork_owner="$(gh api user --jq .login)"
 
   info "Forking $FORK_SPEC on GitHub..."
   if [[ "$DRY_RUN" -eq 0 ]]; then
