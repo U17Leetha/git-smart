@@ -1453,6 +1453,8 @@ run_switch() {
 
 run_doctor() {
   local current_url="" identity_personal="" identity_work="" repo_profile="" repo_owner="" repo_host=""
+  local expected_default_key="" actual_default_key="" expected_git_name="" expected_git_email=""
+  local actual_git_name="" actual_git_email=""
   local suggestions=()
 
   info "Config file        : $CONFIG_FILE"
@@ -1477,6 +1479,34 @@ run_doctor() {
     info "Work identity    : $identity_work"
   else
     suggestions+=("Add SSH config for '$GITHUB_WORK_HOST' so work repos use the correct key.")
+  fi
+  printf '\n'
+
+  info "Global default profile: ${GIT_SMART_GLOBAL_PROFILE:-"(unset)"}"
+  if [[ -n "$GIT_SMART_GLOBAL_PROFILE" ]]; then
+    expected_default_key="$(current_identity_for_host_config "$(profile_host "$GIT_SMART_GLOBAL_PROFILE")")"
+    actual_default_key="$(current_identity_for_host_config "$GITHUB_DEFAULT_HOST")"
+    info "Bare $GITHUB_DEFAULT_HOST identity   : ${actual_default_key:-"(unset)"}"
+
+    if [[ -n "$expected_default_key" && "$(expand_path "$actual_default_key")" != "$(expand_path "$expected_default_key")" ]]; then
+      suggestions+=("Bare '$GITHUB_DEFAULT_HOST' SSH identity does not match the global profile ('$GIT_SMART_GLOBAL_PROFILE'). Run 'git-smart global --profile $GIT_SMART_GLOBAL_PROFILE' to re-apply it.")
+    fi
+
+    expected_git_name="$(profile_git_name "$GIT_SMART_GLOBAL_PROFILE")"
+    expected_git_email="$(profile_git_email "$GIT_SMART_GLOBAL_PROFILE")"
+    actual_git_name="$(git config --global --get user.name 2>/dev/null || true)"
+    actual_git_email="$(git config --global --get user.email 2>/dev/null || true)"
+    info "Global git user.name    : ${actual_git_name:-"(unset)"}"
+    info "Global git user.email   : ${actual_git_email:-"(unset)"}"
+
+    if [[ -n "$expected_git_name" && "$actual_git_name" != "$expected_git_name" ]]; then
+      suggestions+=("Global git user.name does not match the '$GIT_SMART_GLOBAL_PROFILE' profile. Run 'git-smart global --profile $GIT_SMART_GLOBAL_PROFILE' to re-apply it.")
+    fi
+    if [[ -n "$expected_git_email" && "$actual_git_email" != "$expected_git_email" ]]; then
+      suggestions+=("Global git user.email does not match the '$GIT_SMART_GLOBAL_PROFILE' profile. Run 'git-smart global --profile $GIT_SMART_GLOBAL_PROFILE' to re-apply it.")
+    fi
+  else
+    suggestions+=("No global default profile is set. Run 'git-smart global --profile work' (or personal) to make one profile the machine-wide default for tools outside git-smart.")
   fi
   printf '\n'
 
