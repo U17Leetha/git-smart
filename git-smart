@@ -99,6 +99,7 @@ Commands:
   where     Print the repo's resolved git-smart context
   open      Open the repo's GitHub page
   switch    Rebind the current repo to personal or work
+  global    Set the machine-wide default profile (SSH + git identity)
   doctor    Diagnose config, SSH aliases, and current repo context
   help      Show help
 
@@ -219,6 +220,20 @@ Options:
 EOF
 }
 
+usage_global() {
+  cat <<'EOF'
+Usage: git-smart global [options]
+
+Options:
+  --profile personal|work
+  --dry-run
+
+Sets the machine-wide default: the bare github.com SSH host and the
+global git config identity. If --profile is omitted, uses the saved
+GIT_SMART_GLOBAL_PROFILE or prompts interactively.
+EOF
+}
+
 usage_doctor() {
   cat <<'EOF'
 Usage: git-smart doctor [options]
@@ -294,7 +309,7 @@ parse_global_args() {
       usage
       exit 0
       ;;
-    setup|init|clone|push|pull|status|where|open|switch|doctor)
+    setup|init|clone|push|pull|status|where|open|switch|global|doctor)
       COMMAND="$1"
       shift
       ;;
@@ -338,6 +353,7 @@ parse_common_option() {
         where) usage_where ;;
         open) usage_open ;;
         switch) usage_switch ;;
+        global) usage_global ;;
         doctor) usage_doctor ;;
       esac
       exit 0
@@ -411,7 +427,7 @@ parse_command_args() {
             ;;
         esac
         ;;
-      pull|status|where|open|doctor)
+      pull|status|where|open|global|doctor)
         break
         ;;
     esac
@@ -1015,6 +1031,71 @@ show_public_key_details() {
   fi
 }
 
+apply_global_profile() {
+  local profile="$1"
+  local host_alias key_path current_default git_name git_email
+
+  host_alias="$(profile_host "$profile")"
+  key_path="$(current_identity_for_host_config "$host_alias")"
+
+  [[ -n "$key_path" ]] || die "No SSH key configured for '$host_alias' yet. Run 'git-smart setup' first."
+
+  info "Applying '$profile' as the global default profile"
+
+  current_default="$(current_identity_for_host_config "$GITHUB_DEFAULT_HOST")"
+  if [[ -z "$current_default" ]]; then
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      append_ssh_host_if_missing "$GITHUB_DEFAULT_HOST" "$key_path"
+    else
+      printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_DEFAULT_HOST" "$key_path"
+    fi
+  elif [[ "$(expand_path "$current_default")" != "$(expand_path "$key_path")" ]]; then
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      update_ssh_host_identity "$GITHUB_DEFAULT_HOST" "$key_path"
+    else
+      printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_DEFAULT_HOST" "$key_path"
+    fi
+  fi
+  info "SSH default (Host $GITHUB_DEFAULT_HOST) -> $key_path"
+
+  git_name="$(profile_git_name "$profile")"
+  git_email="$(profile_git_email "$profile")"
+
+  if [[ -n "$git_name" ]]; then
+    [[ "$DRY_RUN" -eq 0 ]] && git config --global user.name "$git_name"
+    info "Global git user.name -> $git_name"
+  else
+    info "No git author name configured for '$profile'; skipping global git identity name."
+  fi
+
+  if [[ -n "$git_email" ]]; then
+    [[ "$DRY_RUN" -eq 0 ]] && git config --global user.email "$git_email"
+    info "Global git user.email -> $git_email"
+  else
+    info "No git author email configured for '$profile'; skipping global git identity email."
+  fi
+
+  GIT_SMART_GLOBAL_PROFILE="$profile"
+  [[ "$DRY_RUN" -eq 0 ]] && save_config
+}
+
+run_global() {
+  local requested_profile="$PROFILE"
+
+  if [[ "$requested_profile" == "auto" ]]; then
+    if [[ -n "$GIT_SMART_GLOBAL_PROFILE" ]]; then
+      requested_profile="$GIT_SMART_GLOBAL_PROFILE"
+    else
+      requested_profile="$(resolve_profile_interactively)"
+    fi
+  fi
+
+  apply_global_profile "$requested_profile"
+
+  printf '\n'
+  info "Global default profile is now '$requested_profile'."
+}
+
 run_setup() {
   local personal_owner work_owner personal_dir work_dir personal_host work_host
   local personal_key work_key personal_current work_current
@@ -1444,6 +1525,7 @@ main() {
     where) run_where ;;
     open) run_open ;;
     switch) run_switch ;;
+    global) run_global ;;
     doctor) run_doctor ;;
     *) usage; exit 1 ;;
   esac
