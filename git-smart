@@ -1250,9 +1250,7 @@ run_init() {
     mkdir -p "$base_dir" "$target_dir"
     git -C "$target_dir" init -b main
     git -C "$target_dir" remote add "$REMOTE" "$remote_url"
-    git -C "$target_dir" config --local git-smart.profile "$PROFILE"
-    git -C "$target_dir" config --local git-smart.owner "$owner"
-    git -C "$target_dir" config --local git-smart.sshHost "$(profile_host "$PROFILE")"
+    (cd "$target_dir" && write_repo_context "$PROFILE" "$owner" "$(profile_host "$PROFILE")")
   fi
 
   if [[ "$use_gh" -eq 1 ]]; then
@@ -1304,9 +1302,7 @@ run_clone() {
   if [[ "$DRY_RUN" -eq 0 ]]; then
     mkdir -p "$(dirname "$target_dir")"
     git clone "$clone_url" "$target_dir"
-    git -C "$target_dir" config --local git-smart.profile "$resolved_profile"
-    git -C "$target_dir" config --local git-smart.owner "$owner"
-    git -C "$target_dir" config --local git-smart.sshHost "$(profile_host "$resolved_profile")"
+    (cd "$target_dir" && write_repo_context "$resolved_profile" "$owner" "$(profile_host "$resolved_profile")")
   fi
 
   info "Repo cloned to $target_dir"
