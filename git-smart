@@ -1201,8 +1201,12 @@ run_setup() {
   GITHUB_PERSONAL_HOST="$personal_host"
   GITHUB_WORK_HOST="$work_host"
 
-  save_config
-  info "Wrote config to $CONFIG_FILE"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    save_config
+    info "Wrote config to $CONFIG_FILE"
+  else
+    printf '[*] Dry run: would write config to %s\n' "$CONFIG_FILE"
+  fi
 
   if [[ "$is_first_run" -eq 1 ]]; then
     printf '\nGitHub uses an SSH key to know it is really you connecting, instead of\n'
@@ -1220,20 +1224,36 @@ run_setup() {
     if [[ -n "$personal_current" && "$(expand_path "$personal_current")" != "$(expand_path "$personal_key")" ]]; then
       info "SSH host '$GITHUB_PERSONAL_HOST' currently uses $personal_current"
       if prompt_yes_no "Update '$GITHUB_PERSONAL_HOST' to use $personal_key?" "y"; then
-        update_ssh_host_identity "$GITHUB_PERSONAL_HOST" "$personal_key"
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+          update_ssh_host_identity "$GITHUB_PERSONAL_HOST" "$personal_key"
+        else
+          printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_PERSONAL_HOST" "$personal_key"
+        fi
       fi
     else
-      append_ssh_host_if_missing "$GITHUB_PERSONAL_HOST" "$personal_key"
+      if [[ "$DRY_RUN" -eq 0 ]]; then
+        append_ssh_host_if_missing "$GITHUB_PERSONAL_HOST" "$personal_key"
+      else
+        printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_PERSONAL_HOST" "$personal_key"
+      fi
     fi
 
     work_current="$(current_identity_for_host_config "$GITHUB_WORK_HOST")"
     if [[ -n "$work_current" && "$(expand_path "$work_current")" != "$(expand_path "$work_key")" ]]; then
       info "SSH host '$GITHUB_WORK_HOST' currently uses $work_current"
       if prompt_yes_no "Update '$GITHUB_WORK_HOST' to use $work_key?" "y"; then
-        update_ssh_host_identity "$GITHUB_WORK_HOST" "$work_key"
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+          update_ssh_host_identity "$GITHUB_WORK_HOST" "$work_key"
+        else
+          printf '[*] Dry run: update Host %s IdentityFile to %s\n' "$GITHUB_WORK_HOST" "$work_key"
+        fi
       fi
     else
-      append_ssh_host_if_missing "$GITHUB_WORK_HOST" "$work_key"
+      if [[ "$DRY_RUN" -eq 0 ]]; then
+        append_ssh_host_if_missing "$GITHUB_WORK_HOST" "$work_key"
+      else
+        printf '[*] Dry run: add Host %s with IdentityFile %s\n' "$GITHUB_WORK_HOST" "$work_key"
+      fi
     fi
 
     info "Updated SSH config at $SSH_CONFIG_FILE"
