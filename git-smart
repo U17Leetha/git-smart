@@ -1582,9 +1582,14 @@ run_push() {
     fi
     printf ' %s %s\n' "$REMOTE" "$BRANCH"
   else
-    local push_output
+    local push_output push_status
     push_output="$(mktemp)"
-    if git push "${push_args[@]}" "$REMOTE" "$BRANCH" 2>&1 | tee "$push_output"; then
+    set +e
+    git push --progress "${push_args[@]}" "$REMOTE" "$BRANCH" 2>&1 | tee "$push_output"
+    push_status="${PIPESTATUS[0]}"
+    set -e
+
+    if [[ "$push_status" -eq 0 ]]; then
       rm -f "$push_output"
     else
       explain_git_failure "$(cat "$push_output")"
@@ -1608,9 +1613,14 @@ run_pull() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[*] Dry run: git pull --ff-only %s %s\n' "$REMOTE" "$BRANCH"
   else
-    local pull_output
+    local pull_output pull_status
     pull_output="$(mktemp)"
-    if git pull --ff-only "$REMOTE" "$BRANCH" 2>&1 | tee "$pull_output"; then
+    set +e
+    git pull --progress --ff-only "$REMOTE" "$BRANCH" 2>&1 | tee "$pull_output"
+    pull_status="${PIPESTATUS[0]}"
+    set -e
+
+    if [[ "$pull_status" -eq 0 ]]; then
       rm -f "$pull_output"
     else
       explain_git_failure "$(cat "$pull_output")"
