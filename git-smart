@@ -1152,14 +1152,44 @@ run_setup() {
   local personal_owner work_owner personal_dir work_dir personal_host work_host
   local personal_key work_key personal_current work_current
   local global_profile
+  local is_first_run=0
+
+  [[ -f "$CONFIG_FILE" ]] || is_first_run=1
 
   info "Interactive git-smart setup"
   printf '\n'
 
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf 'git-smart helps you use two separate GitHub identities on this machine --\n'
+    printf 'one for personal projects, one for work -- without having to remember which\n'
+    printf 'SSH key or git config to use each time. This asks a handful of questions;\n'
+    printf 'the default shown in [brackets] is almost always fine -- just press Enter.\n'
+    printf '\n'
+  fi
+
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf 'A GitHub "owner" is whoever a repo belongs to -- usually your own username,\n'
+    printf 'but it can be an organization name (common for work repos).\n'
+    printf '\n'
+  fi
   personal_owner="$(prompt "Personal GitHub owner" "${GITHUB_PERSONAL_DEFAULT_OWNER:-U17Leetha}")"
   work_owner="$(prompt "Work GitHub owner" "${GITHUB_WORK_DEFAULT_OWNER:-}")"
+
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf '\nThese are the folders on your computer where git-smart will put new\n'
+    printf 'personal and work repos, and where it looks to guess which profile a\n'
+    printf 'repo belongs to.\n'
+    printf '\n'
+  fi
   personal_dir="$(prompt "Personal repos directory" "$GIT_SMART_PERSONAL_DIR")"
   work_dir="$(prompt "Work repos directory" "$GIT_SMART_WORK_DIR")"
+
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf '\nThese next two are internal nicknames git-smart uses in your SSH config\n'
+    printf 'to tell your personal and work keys apart -- the defaults are fine, just\n'
+    printf 'press Enter.\n'
+    printf '\n'
+  fi
   personal_host="$(prompt "Personal SSH host alias" "$GITHUB_PERSONAL_HOST")"
   work_host="$(prompt "Work SSH host alias" "$GITHUB_WORK_HOST")"
 
@@ -1175,6 +1205,12 @@ run_setup() {
   save_config
   info "Wrote config to $CONFIG_FILE"
 
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf '\nGitHub uses an SSH key to know it is really you connecting, instead of\n'
+    printf 'typing a password every time. If you do not already have separate keys\n'
+    printf 'for personal and work, git-smart can generate them now.\n'
+    printf '\n'
+  fi
   if prompt_yes_no "Add or update SSH host entries in $SSH_CONFIG_FILE?" "y"; then
     personal_key="$(prompt "Personal SSH key path" "~/.ssh/id_ed25519_github_personal")"
     work_key="$(prompt "Work SSH key path" "~/.ssh/id_ed25519_work")"
@@ -1205,10 +1241,31 @@ run_setup() {
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
       show_public_key_details "personal" "$personal_key"
+      if [[ "$is_first_run" -eq 1 ]]; then
+        printf '\n  To add this key to GitHub:\n'
+        printf '    1. Copy the public key printed above\n'
+        printf '    2. Go to https://github.com/settings/ssh/new\n'
+        printf '    3. Give it a memorable title, e.g. "personal key"\n'
+        printf '    4. Paste the key into the "Key" field and click "Add SSH key"\n'
+      fi
       show_public_key_details "work" "$work_key"
+      if [[ "$is_first_run" -eq 1 ]]; then
+        printf '\n  To add this key to GitHub:\n'
+        printf '    1. Copy the public key printed above\n'
+        printf '    2. Go to https://github.com/settings/ssh/new\n'
+        printf '    3. Give it a memorable title, e.g. "work key"\n'
+        printf '    4. Paste the key into the "Key" field and click "Add SSH key"\n'
+      fi
     fi
   fi
 
+  if [[ "$is_first_run" -eq 1 ]]; then
+    printf '\nOne more thing: your computer has a single "default" GitHub identity for\n'
+    printf 'tools that do not go through git-smart (like a plain "git clone" or the\n'
+    printf 'gh tool from GitHub). Setting one here makes that default match one of\n'
+    printf 'your profiles instead of being left unset.\n'
+    printf '\n'
+  fi
   global_profile="$(prompt "Global default profile for tools outside git-smart (personal/work/none)" "$GIT_SMART_GLOBAL_PROFILE")"
   case "${global_profile,,}" in
     personal|p)
