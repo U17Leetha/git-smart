@@ -1176,7 +1176,7 @@ run_setup() {
   work_owner="$(prompt "Work GitHub owner" "${GITHUB_WORK_DEFAULT_OWNER:-}")"
 
   if [[ "$is_first_run" -eq 1 ]]; then
-    printf '\nThese are the folders on your computer where git-smart will put new\n'
+    printf 'These are the folders on your computer where git-smart will put new\n'
     printf 'personal and work repos, and where it looks to guess which profile a\n'
     printf 'repo belongs to.\n'
     printf '\n'
@@ -1185,9 +1185,8 @@ run_setup() {
   work_dir="$(prompt "Work repos directory" "$GIT_SMART_WORK_DIR")"
 
   if [[ "$is_first_run" -eq 1 ]]; then
-    printf '\nThese next two are internal nicknames git-smart uses in your SSH config\n'
-    printf 'to tell your personal and work keys apart -- the defaults are fine, just\n'
-    printf 'press Enter.\n'
+    printf 'These next two are internal nicknames git-smart uses to tell your personal\n'
+    printf 'and work setups apart later on -- the defaults are fine, just press Enter.\n'
     printf '\n'
   fi
   personal_host="$(prompt "Personal SSH host alias" "$GITHUB_PERSONAL_HOST")"
@@ -1264,7 +1263,6 @@ run_setup() {
     printf 'tools that do not go through git-smart (like a plain "git clone" or the\n'
     printf 'gh tool from GitHub). Setting one here makes that default match one of\n'
     printf 'your profiles instead of being left unset.\n'
-    printf '\n'
   fi
   global_profile="$(prompt "Global default profile for tools outside git-smart (personal/work/none)" "$GIT_SMART_GLOBAL_PROFILE")"
   case "${global_profile,,}" in
