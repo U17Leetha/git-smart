@@ -1266,7 +1266,7 @@ run_setup() {
     printf 'for personal and work, git-smart can generate them now.\n'
     printf '\n'
   fi
-  if prompt_yes_no "Add or update SSH host entries in $SSH_CONFIG_FILE?" "y"; then
+  if prompt_yes_no "Add or update SSH host entries in $GIT_SMART_SSH_INCLUDE_FILE?" "y"; then
     personal_key="$(prompt "Personal SSH key path" "~/.ssh/id_ed25519_github_personal")"
     work_key="$(prompt "Work SSH key path" "~/.ssh/id_ed25519_work")"
     personal_key="$(ensure_ssh_key "personal" "$personal_owner" "$personal_key")"
@@ -1287,7 +1287,7 @@ run_setup() {
     fi
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
-      info "Updated SSH config at $SSH_CONFIG_FILE"
+      info "Updated SSH config at $GIT_SMART_SSH_INCLUDE_FILE"
       show_public_key_details "personal" "$personal_key"
       if [[ "$is_first_run" -eq 1 ]]; then
         printf '\n  To add this key to GitHub:\n'
