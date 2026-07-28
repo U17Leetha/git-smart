@@ -1544,7 +1544,7 @@ run_push() {
       git diff --cached --stat
       printf '\n'
 
-      if [[ "$SKIP_CONFIRM" -eq 0 ]] && ! prompt_yes_no "Commit these changes with message \"$COMMIT_MESSAGE\"?" "y"; then
+      if [[ "$SKIP_CONFIRM" -eq 0 ]] && ! prompt_yes_no "Commit these changes with message \"$COMMIT_MESSAGE\"?" "n"; then
         git reset >/dev/null
         die "Push cancelled."
       fi
