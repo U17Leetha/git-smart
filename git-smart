@@ -310,7 +310,11 @@ EOF
 load_config() {
   if [[ -f "$CONFIG_FILE" ]]; then
     local perms
-    perms="$(stat -f '%Lp' "$CONFIG_FILE" 2>/dev/null || stat -c '%a' "$CONFIG_FILE" 2>/dev/null)"
+    # Fallback `|| true`: if neither BSD `stat -f` nor GNU `stat -c` is available (e.g. BusyBox
+    # stat), this substitution would otherwise exit non-zero and, under `set -e`, kill the script
+    # with no error message. The `|| true` lets perms end up empty so the guard below can skip
+    # the check cleanly instead of crashing silently.
+    perms="$(stat -f '%Lp' "$CONFIG_FILE" 2>/dev/null || stat -c '%a' "$CONFIG_FILE" 2>/dev/null || true)"
     if [[ -n "$perms" && "${perms: -2}" != "00" ]]; then
       die "$CONFIG_FILE is group/world accessible (permissions: $perms). Run 'chmod 600 $CONFIG_FILE' before continuing."
     fi
