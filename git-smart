@@ -93,6 +93,7 @@ Commands:
   setup     Interactive first-run setup for personal/work GitHub profiles
   init      Create a new repo in the correct personal/work directory
   clone     Clone a repo into the correct personal/work directory
+  here      Attach the current directory to a profile (bootstrap the remote)
   push      Commit and push using the repo's saved context
   pull      Pull using the repo's saved context
   status    Show repo status plus git-smart context
@@ -150,6 +151,22 @@ Options:
   --dry-run
 
 If --profile is omitted, git-smart will infer from owner or ask interactively.
+EOF
+}
+
+usage_here() {
+  cat <<'EOF'
+Usage: git-smart here [options]
+
+Options:
+  --profile personal|work
+  --owner OWNER
+  --dry-run
+
+Attaches the current directory to a profile: runs git init if needed,
+adds the remote (the GitHub repo must already exist), and saves repo
+context. Fails if a remote is already configured -- use 'git-smart
+switch' for that case instead.
 EOF
 }
 
@@ -309,7 +326,7 @@ parse_global_args() {
       usage
       exit 0
       ;;
-    setup|init|clone|push|pull|status|where|open|switch|global|doctor)
+    setup|init|clone|here|push|pull|status|where|open|switch|global|doctor)
       COMMAND="$1"
       shift
       ;;
@@ -347,6 +364,7 @@ parse_common_option() {
         setup) usage_setup ;;
         init) usage_init ;;
         clone) usage_clone ;;
+        here) usage_here ;;
         push) usage_push ;;
         pull) usage_pull ;;
         status) usage_status ;;
@@ -416,6 +434,18 @@ parse_command_args() {
         esac
         ;;
       switch)
+        case "$1" in
+          --owner)
+            [[ $# -ge 2 ]] || die "--owner requires a value"
+            INIT_OWNER="$2"
+            shift
+            ;;
+          *)
+            break
+            ;;
+        esac
+        ;;
+      here)
         case "$1" in
           --owner)
             [[ $# -ge 2 ]] || die "--owner requires a value"
@@ -1318,6 +1348,58 @@ run_clone() {
   info "Done."
 }
 
+run_here() {
+  local repo_name owner remote_url toplevel
+
+  ensure_profile_for_creation
+
+  repo_name="$(basename "$PWD")"
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    toplevel="$(git rev-parse --show-toplevel)"
+    if [[ "$toplevel" != "$PWD" ]]; then
+      die "This directory is inside an existing repo at $toplevel. Run 'git-smart here' from a directory that isn't nested inside another repo."
+    fi
+  else
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      git init -b main
+    else
+      printf '[*] Dry run: git init -b main\n'
+    fi
+  fi
+
+  if git remote get-url "$REMOTE" >/dev/null 2>&1; then
+    die "Remote '$REMOTE' is already configured for this repo. Run 'git-smart switch --profile $PROFILE' instead."
+  fi
+
+  owner="$INIT_OWNER"
+  if [[ -z "$owner" ]]; then
+    owner="$(profile_default_owner "$PROFILE")"
+  fi
+  if [[ -z "$owner" ]]; then
+    owner="$(prompt "GitHub owner for this repo")"
+  fi
+
+  remote_url="$(build_remote_url "$owner" "$repo_name" "$PROFILE")"
+
+  info "Profile   : $PROFILE"
+  info "Owner     : $owner"
+  info "Repo dir  : $PWD"
+  info "Remote URL: $remote_url"
+  printf '\n'
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    git remote add "$REMOTE" "$remote_url"
+    write_repo_context "$PROFILE" "$owner" "$(profile_host "$PROFILE")"
+  else
+    printf '[*] Dry run: git remote add %s %s\n' "$REMOTE" "$remote_url"
+  fi
+
+  info "Attached $repo_name to profile '$PROFILE'."
+  info "Remote set to $remote_url"
+  info "Done."
+}
+
 show_repo_context() {
   local identity_file=""
 
@@ -1592,6 +1674,7 @@ main() {
     setup) run_setup ;;
     init) run_init ;;
     clone) run_clone ;;
+    here) run_here ;;
     push) run_push ;;
     pull) run_pull ;;
     status) run_status ;;
