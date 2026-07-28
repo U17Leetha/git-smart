@@ -1256,9 +1256,8 @@ run_setup() {
       fi
     fi
 
-    info "Updated SSH config at $SSH_CONFIG_FILE"
-
     if [[ "$DRY_RUN" -eq 0 ]]; then
+      info "Updated SSH config at $SSH_CONFIG_FILE"
       show_public_key_details "personal" "$personal_key"
       if [[ "$is_first_run" -eq 1 ]]; then
         printf '\n  To add this key to GitHub:\n'
