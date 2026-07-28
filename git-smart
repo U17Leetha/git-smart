@@ -1033,7 +1033,7 @@ show_public_key_details() {
 
 apply_global_profile() {
   local profile="$1"
-  local host_alias key_path current_default git_name git_email
+  local host_alias key_path current_default host_exists git_name git_email
 
   host_alias="$(profile_host "$profile")"
   key_path="$(current_identity_for_host_config "$host_alias")"
@@ -1042,8 +1042,13 @@ apply_global_profile() {
 
   info "Applying '$profile' as the global default profile"
 
+  host_exists=0
+  if [[ -f "$SSH_CONFIG_FILE" ]] && grep -Eq "^Host[[:space:]]+${GITHUB_DEFAULT_HOST}$" "$SSH_CONFIG_FILE"; then
+    host_exists=1
+  fi
   current_default="$(current_identity_for_host_config "$GITHUB_DEFAULT_HOST")"
-  if [[ -z "$current_default" ]]; then
+
+  if [[ "$host_exists" -eq 0 ]]; then
     if [[ "$DRY_RUN" -eq 0 ]]; then
       append_ssh_host_if_missing "$GITHUB_DEFAULT_HOST" "$key_path"
     else
@@ -1062,15 +1067,23 @@ apply_global_profile() {
   git_email="$(profile_git_email "$profile")"
 
   if [[ -n "$git_name" ]]; then
-    [[ "$DRY_RUN" -eq 0 ]] && git config --global user.name "$git_name"
-    info "Global git user.name -> $git_name"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      git config --global user.name "$git_name"
+      info "Global git user.name -> $git_name"
+    else
+      printf '[*] Dry run: set global git user.name to %s\n' "$git_name"
+    fi
   else
     info "No git author name configured for '$profile'; skipping global git identity name."
   fi
 
   if [[ -n "$git_email" ]]; then
-    [[ "$DRY_RUN" -eq 0 ]] && git config --global user.email "$git_email"
-    info "Global git user.email -> $git_email"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      git config --global user.email "$git_email"
+      info "Global git user.email -> $git_email"
+    else
+      printf '[*] Dry run: set global git user.email to %s\n' "$git_email"
+    fi
   else
     info "No git author email configured for '$profile'; skipping global git identity email."
   fi
