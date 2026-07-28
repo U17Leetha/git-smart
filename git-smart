@@ -1113,6 +1113,7 @@ run_global() {
 run_setup() {
   local personal_owner work_owner personal_dir work_dir personal_host work_host
   local personal_key work_key personal_current work_current
+  local global_profile
 
   info "Interactive git-smart setup"
   printf '\n'
@@ -1169,6 +1170,19 @@ run_setup() {
       show_public_key_details "work" "$work_key"
     fi
   fi
+
+  global_profile="$(prompt "Global default profile for tools outside git-smart (personal/work, blank = skip)" "$GIT_SMART_GLOBAL_PROFILE")"
+  case "$global_profile" in
+    personal|work)
+      apply_global_profile "$global_profile"
+      ;;
+    "")
+      :
+      ;;
+    *)
+      warn "Unknown profile '$global_profile'; skipping global default setup."
+      ;;
+  esac
 
   printf '\n'
   info "Next steps:"
