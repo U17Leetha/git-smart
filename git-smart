@@ -1171,18 +1171,30 @@ run_setup() {
     fi
   fi
 
-  global_profile="$(prompt "Global default profile for tools outside git-smart (personal/work, blank = skip)" "$GIT_SMART_GLOBAL_PROFILE")"
-  case "$global_profile" in
-    personal|work)
-      apply_global_profile "$global_profile"
+  global_profile="$(prompt "Global default profile for tools outside git-smart (personal/work/none)" "$GIT_SMART_GLOBAL_PROFILE")"
+  case "${global_profile,,}" in
+    personal|p)
+      global_profile="personal"
       ;;
-    "")
-      :
+    work|w)
+      global_profile="work"
+      ;;
+    none|"")
+      global_profile=""
       ;;
     *)
       warn "Unknown profile '$global_profile'; skipping global default setup."
+      global_profile=""
       ;;
   esac
+
+  if [[ -n "$global_profile" ]]; then
+    if [[ -z "$(current_identity_for_host_config "$(profile_host "$global_profile")")" ]]; then
+      warn "No SSH key configured for the '$global_profile' host yet; skipping global default setup. Run 'git-smart global' later once a key is configured."
+    else
+      apply_global_profile "$global_profile"
+    fi
+  fi
 
   printf '\n'
   info "Next steps:"
