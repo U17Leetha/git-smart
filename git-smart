@@ -944,7 +944,7 @@ expand_path() {
       printf '%s\n' "$HOME"
       ;;
     "~/"*)
-      printf '%s/%s\n' "$HOME" "${raw_path#~/}"
+      printf '%s/%s\n' "$HOME" "${raw_path#\~/}"
       ;;
     *)
       printf '%s\n' "$raw_path"
@@ -986,7 +986,7 @@ ensure_ssh_key() {
   pub_path="${expanded_path}.pub"
 
   if [[ -f "$expanded_path" ]]; then
-    info "$label SSH key already exists at $expanded_path"
+    info "$label SSH key already exists at $expanded_path" >&2
     printf '%s\n' "$expanded_path"
     return 0
   fi
@@ -997,14 +997,14 @@ ensure_ssh_key() {
     return 0
   fi
 
-  info "Generating $label SSH key..."
+  info "Generating $label SSH key..." >&2
   if [[ "$DRY_RUN" -eq 0 ]]; then
     ensure_ssh_dir
-    ssh-keygen -t ed25519 -C "${owner}-${label}-github" -f "$expanded_path" -N ""
+    ssh-keygen -t ed25519 -C "${owner}-${label}-github" -f "$expanded_path" -N "" >&2
     chmod 600 "$expanded_path"
     chmod 644 "$pub_path"
   else
-    printf '[*] Dry run: ssh-keygen -t ed25519 -C %s -f %s -N ""\n' "${owner}-${label}-github" "$expanded_path"
+    printf '[*] Dry run: ssh-keygen -t ed25519 -C %s -f %s -N ""\n' "${owner}-${label}-github" "$expanded_path" >&2
   fi
 
   printf '%s\n' "$expanded_path"
