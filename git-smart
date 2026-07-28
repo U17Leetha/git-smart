@@ -703,8 +703,7 @@ resolve_profile_interactively() {
 }
 
 load_remote_state() {
-  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-  [[ "$BRANCH" != "HEAD" ]] || die "Detached HEAD is not supported."
+  BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null)" || die "Detached HEAD is not supported."
 
   git remote get-url "$REMOTE" >/dev/null 2>&1 || die "Remote '$REMOTE' not found."
   REMOTE_URL="$(git remote get-url "$REMOTE")"
