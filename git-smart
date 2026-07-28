@@ -10,8 +10,6 @@ DEFAULT_WORK_HOST="github-work"
 DEFAULT_GITHUB_HOST="github.com"
 DEFAULT_PERSONAL_DIR="${HOME}/Development/Personal"
 DEFAULT_WORK_DIR="${HOME}/Development/Work"
-DEFAULT_WORK_GIT_AUTHOR_NAME="$(git config --global --get user.name 2>/dev/null || true)"
-DEFAULT_WORK_GIT_AUTHOR_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
 
 COMMAND=""
 PROFILE="auto"
@@ -243,8 +241,8 @@ load_config() {
   GIT_SMART_PERSONAL_DIR="${GIT_SMART_PERSONAL_DIR:-$DEFAULT_PERSONAL_DIR}"
   GIT_SMART_WORK_DIR="${GIT_SMART_WORK_DIR:-$DEFAULT_WORK_DIR}"
   GIT_SMART_GLOBAL_PROFILE="${GIT_SMART_GLOBAL_PROFILE:-}"
-  GIT_SMART_WORK_GIT_NAME="${GIT_SMART_WORK_GIT_NAME:-$DEFAULT_WORK_GIT_AUTHOR_NAME}"
-  GIT_SMART_WORK_GIT_EMAIL="${GIT_SMART_WORK_GIT_EMAIL:-$DEFAULT_WORK_GIT_AUTHOR_EMAIL}"
+  GIT_SMART_WORK_GIT_NAME="${GIT_SMART_WORK_GIT_NAME:-$(git config --global --get user.name 2>/dev/null || true)}"
+  GIT_SMART_WORK_GIT_EMAIL="${GIT_SMART_WORK_GIT_EMAIL:-$(git config --global --get user.email 2>/dev/null || true)}"
 
   if ! declare -p GITHUB_PERSONAL_OWNERS >/dev/null 2>&1; then
     GITHUB_PERSONAL_OWNERS=()
