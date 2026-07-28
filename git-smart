@@ -944,6 +944,9 @@ expand_path() {
       printf '%s\n' "$HOME"
       ;;
     "~/"*)
+      # \~ escapes the pattern's tilde so bash doesn't tilde-expand it before
+      # matching (an unescaped ~/ here silently fails to strip and leaves a
+      # literal "~/" in the result).
       printf '%s/%s\n' "$HOME" "${raw_path#\~/}"
       ;;
     *)
@@ -977,6 +980,10 @@ copy_file_to_clipboard() {
 }
 
 ensure_ssh_key() {
+  # Returns its result via stdout (see printf calls below), so every other
+  # message in this function -- info/warn calls, ssh-keygen's own output,
+  # the dry-run line -- must go to stderr or it corrupts the caller's
+  # captured value.
   local label="$1"
   local owner="$2"
   local requested_path="$3"
