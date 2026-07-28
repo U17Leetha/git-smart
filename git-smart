@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+  printf '[!] git-smart requires bash >= 4 (found %s). On macOS: brew install bash\n' "$BASH_VERSION" >&2
+  exit 1
+fi
+
 PROGRAM_NAME="git-smart"
 CONFIG_FILE="${HOME}/.config/git-smart.conf"
 SSH_CONFIG_FILE="${HOME}/.ssh/config"
