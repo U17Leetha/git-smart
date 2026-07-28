@@ -89,7 +89,8 @@ repo rooted there), adds the remote (the GitHub repo must already exist --
 `here` doesn't create it for you), and saves the same repo-local context
 `switch` does. If a remote is already configured, `here` refuses and points
 you at `git-smart switch` instead, which is the right tool for rebinding an
-already-remoted repo.
+already-remoted repo. It also refuses if the current directory is nested
+inside another repo's working tree.
 
 ## Global default profile
 

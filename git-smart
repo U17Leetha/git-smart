@@ -166,7 +166,8 @@ Options:
 Attaches the current directory to a profile: runs git init if needed,
 adds the remote (the GitHub repo must already exist), and saves repo
 context. Fails if a remote is already configured -- use 'git-smart
-switch' for that case instead.
+switch' for that case instead. Also fails if the current directory is
+nested inside another repo's working tree.
 EOF
 }
 
@@ -1353,10 +1354,10 @@ run_here() {
 
   ensure_profile_for_creation
 
-  # Uses the logical $PWD, so a directory reached through a symlink with a
-  # different leaf name than its target would take the symlink's name here
-  # (unlike the toplevel check below, which resolves to the physical path).
-  repo_name="$(basename "$PWD")"
+  # Physical path, matching the toplevel check below -- otherwise a directory
+  # reached through a symlink with a different leaf name than its target
+  # would build a remote URL from the symlink's name instead of the real one.
+  repo_name="$(basename "$(pwd -P)")"
 
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     toplevel="$(git rev-parse --show-toplevel)"
