@@ -178,7 +178,7 @@ EOF
 
 usage_fork() {
   cat <<'EOF'
-Usage: git-smart fork <owner/repo> [options]
+Usage: git-smart fork [options] <owner/repo>
 
 Options:
   --profile personal|work
