@@ -1484,6 +1484,23 @@ run_here() {
   info "Done."
 }
 
+explain_git_failure() {
+  local output="$1"
+
+  if printf '%s' "$output" | grep -qi "permission denied (publickey)"; then
+    warn "GitHub rejected your SSH key. Run 'git-smart doctor' to check your SSH setup."
+  elif printf '%s' "$output" | grep -qi "could not read from remote repository"; then
+    warn "Could not reach the remote repository -- check your SSH key and that you have access. Run 'git-smart doctor' to diagnose."
+  elif printf '%s' "$output" | grep -qi "not possible to fast-forward"; then
+    warn "Your branch and the remote have both changed (they've diverged)."
+    warn "This tool only does fast-forward pulls to avoid surprise merges -- resolve this with plain git (e.g. 'git merge' or 'git rebase'), then try again."
+  elif printf '%s' "$output" | grep -qi -E "failed to push some refs|non-fast-forward|fetch first"; then
+    warn "The remote has changes you don't have locally. Run 'git-smart pull' first, then try pushing again."
+  elif printf '%s' "$output" | grep -qi -E "could not resolve host|network is unreachable|could not connect"; then
+    warn "Could not reach GitHub -- check your internet connection."
+  fi
+}
+
 show_repo_context() {
   local identity_file=""
 
@@ -1565,7 +1582,15 @@ run_push() {
     fi
     printf ' %s %s\n' "$REMOTE" "$BRANCH"
   else
-    git push "${push_args[@]}" "$REMOTE" "$BRANCH"
+    local push_output
+    push_output="$(mktemp)"
+    if git push "${push_args[@]}" "$REMOTE" "$BRANCH" 2>&1 | tee "$push_output"; then
+      rm -f "$push_output"
+    else
+      explain_git_failure "$(cat "$push_output")"
+      rm -f "$push_output"
+      die "git push failed. See the output above for details."
+    fi
   fi
 
   info "Done."
@@ -1583,7 +1608,15 @@ run_pull() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[*] Dry run: git pull --ff-only %s %s\n' "$REMOTE" "$BRANCH"
   else
-    git pull --ff-only "$REMOTE" "$BRANCH"
+    local pull_output
+    pull_output="$(mktemp)"
+    if git pull --ff-only "$REMOTE" "$BRANCH" 2>&1 | tee "$pull_output"; then
+      rm -f "$pull_output"
+    else
+      explain_git_failure "$(cat "$pull_output")"
+      rm -f "$pull_output"
+      die "git pull failed. See the output above for details."
+    fi
   fi
 }
 
