@@ -1353,6 +1353,9 @@ run_here() {
 
   ensure_profile_for_creation
 
+  # Uses the logical $PWD, so a directory reached through a symlink with a
+  # different leaf name than its target would take the symlink's name here
+  # (unlike the toplevel check below, which resolves to the physical path).
   repo_name="$(basename "$PWD")"
 
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
